@@ -25,7 +25,7 @@ struct StageProjectionTests {
         let tanHalfFOV: Float
         let aspect: Float
 
-        init(camera: Entity, aspect: Float) {
+        @MainActor init(camera: Entity, aspect: Float) {
             view = camera.transformMatrix(relativeTo: nil).inverse
             let fov = camera.components[PerspectiveCameraComponent.self]!.fieldOfViewInDegrees
             tanHalfFOV = tan(fov * .pi / 180 / 2)
