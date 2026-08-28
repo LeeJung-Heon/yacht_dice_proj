@@ -15,16 +15,3 @@ public enum RuleError: Error, Equatable, Sendable {
     case categoryAlreadyUsed(Category)
     case indexOutOfRange(Int)
 }
-
-extension Result where Success == Void, Failure == RuleError {
-    public static func == (lhs: Self, rhs: Self) -> Bool {
-        switch (lhs, rhs) {
-        case (.success, .success):
-            return true
-        case (.failure(let a), .failure(let b)):
-            return a == b
-        default:
-            return false
-        }
-    }
-}
