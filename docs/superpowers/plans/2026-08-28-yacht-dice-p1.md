@@ -3256,6 +3256,8 @@ Task 2 스파이크가 **경로 A'** 를 채택했다. RealityKit 베이커로 �
 
 **Files:**
 - Create: `Packages/DiceTrajectory/Sources/DiceTrajectory/TrayGeometry.swift`
+- Modify: `Packages/DiceTrajectory/Sources/DiceTrajectory/TrajectoryArchive.swift` (Step 0)
+- Modify: `Packages/DiceTrajectory/Tests/DiceTrajectoryTests/TrajectoryArchiveTests.swift` (Step 0)
 - Modify: `Tools/TrajectoryBaker/BakerApp.swift`
 - Create: `Tools/TrajectoryBaker/BakerScene.swift`
 - Create: `Tools/TrajectoryBaker/BakeRunner.swift`
@@ -3267,6 +3269,49 @@ Task 2 스파이크가 **경로 A'** 를 채택했다. RealityKit 베이커로 �
 - Produces:
   - `App/Resources/trajectories.bin` — 굴리는 개수 1~5 × 방향 3종 × 변형 40개
   - `TrayGeometry.trayInner = SIMD3<Float>(0.24, 0.12, 0.24)`, `TrayGeometry.dieSize: Float = 0.016` (Task 13이 같은 값을 쓴다)
+
+- [ ] **Step 0: 디코더에 개수 상한을 둔다 (Task 11 리뷰 지적)**
+
+`TrajectoryArchive.decode`가 헤더의 `count`를 검증하기 전에 `out.reserveCapacity(Int(count))`를 호출한다. `count`는 `UInt32`라 최대 42억이고, 손상된 파일 하나가 앱 실행 시점에 거대한 할당을 시도하게 만든다. Task 8b에서 저장 파일에 대해 고쳤던 것과 같은 결함 클래스다.
+
+번들 리소스는 코드 서명되어 있어 사용자가 고칠 수 없으므로 위험은 낮지만, **개발 중 잘못된 파일을 번들에 넣는 사고**로도 같은 결과가 난다. 2줄이면 막힌다.
+
+`TrajectoryArchive`의 `Failure`에 케이스를 추가한다:
+
+```swift
+        case tooManyTrajectories(UInt32)
+```
+
+`decode`에서 `count`를 읽은 직후, `reserveCapacity` **앞에** 삽입한다:
+
+```swift
+        // 헤더의 개수를 믿고 미리 할당하면 손상된 파일 하나가 앱 실행 시점에
+        // 거대한 할당을 시도한다. 실제 상한(1~5개 x 방향 3종 x 변형 수십 개)의
+        // 넉넉한 몇 배로 자른다.
+        guard count <= 10_000 else { throw Failure.tooManyTrajectories(count) }
+```
+
+테스트를 `TrajectoryArchiveTests.swift`에 추가한다:
+
+```swift
+    @Test("헤더가 터무니없는 개수를 주장하면 할당 전에 거부한다")
+    func 개수_상한() throws {
+        // 유효한 아카이브의 헤더 개수 필드만 UInt32.max로 바꾼다.
+        var data = try TrajectoryArchive.encode([makeTrajectory()])
+        let countOffset = 6   // magic 4 + version 2
+        for (index, byte) in [UInt8](repeating: 0xFF, count: 4).enumerated() {
+            data[countOffset + index] = byte
+        }
+        #expect(throws: TrajectoryArchive.Failure.tooManyTrajectories(UInt32.max)) {
+            try TrajectoryArchive.decode(data)
+        }
+    }
+```
+
+```bash
+swift test --package-path "Packages/DiceTrajectory"
+```
+Expected: PASS (30 tests)
 
 - [ ] **Step 1: 트레이 치수를 공유 상수로 뽑아 `DiceTrajectory`에 둔다**
 
@@ -3571,14 +3616,17 @@ struct BakerView: View {
 
         do {
             let data = try TrajectoryArchive.encode(model.result.accepted)
-            let url = URL(fileURLWithPath: NSHomeDirectory())
-                .appending(path: "Desktop/trajectories.bin")
+            let url = URL(fileURLWithPath: "/private/tmp/trajectories.bin")
             try data.write(to: url)
             model.progress = "완료: \(url.path) (\(data.count / 1024)KB)"
+            print(model.progress)
+            print(model.result.summary)
         } catch {
             model.progress = "쓰기 실패: \(error)"
+            print(model.progress)
         }
         model.isRunning = false
+        exit(0)   // 셸에서 돌리므로 다 구우면 스스로 종료한다
     }
 }
 ```
@@ -3588,10 +3636,22 @@ struct BakerView: View {
 ```bash
 rm "Tools/TrajectoryBaker/SpikeScene.swift"
 xcodegen generate
-xcodebuild build -project YachtDice.xcodeproj -scheme TrajectoryBaker -destination 'platform=macOS' | tail -3
+xcodebuild build -project YachtDice.xcodeproj -scheme TrajectoryBaker \
+  -destination 'platform=macOS' -derivedDataPath /private/tmp/baker-dd | tail -3
 ```
 
-Xcode에서 `TrajectoryBaker`를 Run하고 "굽기 시작"을 누른다. 약 25분 걸린다.
+**Xcode GUI가 아니라 셸에서 돌린다.** Task 2 스파이크가 macOS RealityKit 앱을 터미널에서 직접 실행하고 stdout을 받아올 수 있음을 증명했다. 베이커도 같은 방식으로 만든다 — 진행 상황을 stdout으로 찍고, 다 구우면 파일을 쓰고 `exit(0)` 한다.
+
+약 25분 걸리므로 **반드시 백그라운드로 띄우고 로그를 폴링한다.** 포그라운드로 돌리면 타임아웃에 걸린다:
+
+```bash
+nohup /private/tmp/baker-dd/Build/Products/Debug/TrajectoryBaker.app/Contents/MacOS/TrajectoryBaker \
+  > /private/tmp/bake.log 2>&1 &
+# 이후 주기적으로
+tail -5 /private/tmp/bake.log
+```
+
+`-derivedDataPath`는 반드시 저장소 밖을 가리킨다 (전역 제약: iCloud 안에서 빌드하면 codesign이 실패한다).
 
 - [ ] **Step 6: 채택률 확인 — 여기서 판정한다**
 
@@ -3610,7 +3670,7 @@ Xcode에서 `TrajectoryBaker`를 Run하고 "굽기 시작"을 누른다. 약 25�
 
 ```bash
 mkdir -p App/Resources
-cp ~/Desktop/trajectories.bin App/Resources/trajectories.bin
+cp /private/tmp/trajectories.bin App/Resources/trajectories.bin
 ls -lh App/Resources/trajectories.bin
 git add -A
 git commit -m "$(cat <<'MSG'
