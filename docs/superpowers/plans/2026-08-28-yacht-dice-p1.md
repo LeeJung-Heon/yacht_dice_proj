@@ -1417,12 +1417,55 @@ MSG
 **Files:**
 - Create: `Packages/YachtCore/Tests/YachtCoreTests/ExhaustiveScoringTests.swift`
 - Create: `Packages/YachtCore/Tests/YachtCoreTests/GameInvariantTests.swift`
+- Create: `Packages/YachtCore/Tests/YachtCoreTests/ResultEquality.swift`
+- Modify: `Packages/YachtCore/Sources/YachtCore/Intent.swift` (테스트 전용 `==` 연산자 제거)
 
 **Interfaces:**
 - Consumes: Task 3의 `Category.score`, Task 4의 `ScoreCard`, Task 5의 `GameState`
 - Produces: 없음 (테스트 전용)
 
-- [ ] **Step 1: 전수 검증 테스트 작성**
+- [ ] **Step 1: 테스트 전용 `==` 연산자를 프로덕션 타깃에서 테스트 타깃으로 옮긴다**
+
+Task 6에서 `Packages/YachtCore/Sources/YachtCore/Intent.swift` 끝에 다음이 들어갔다:
+
+```swift
+extension Result where Success == Void, Failure == RuleError {
+    public static func == (lhs: Self, rhs: Self) -> Bool { ... }
+}
+```
+
+`Result<Void, _>`는 `Void`가 `Equatable`이 아니라서 등가 비교가 안 되고, 검증 테스트가 `validate(...) == .failure(...)` 형태로 쓰기 때문에 필요한 코드다. 하지만 **프로덕션 코드는 이 연산자를 한 번도 쓰지 않는다** — `allows(_:)`는 `if case .success` 패턴 매칭을 쓴다. 테스트 하나 때문에 라이브러리의 public API가 영구히 넓어졌다.
+
+`Intent.swift`에서 그 extension을 통째로 지우고, `Packages/YachtCore/Tests/YachtCoreTests/ResultEquality.swift`를 새로 만든다:
+
+```swift
+import Foundation
+@testable import YachtCore
+
+/// 검증 테스트가 `validate(...) == .failure(...)` 로 쓸 수 있게 해주는 테스트 전용 도우미.
+///
+/// `Result<Void, _>`는 `Void`가 Equatable이 아니라 등가 비교가 안 된다.
+/// 프로덕션 코드는 이 연산자를 쓰지 않으므로(allows(_:)는 패턴 매칭을 쓴다)
+/// 라이브러리의 public API를 넓히지 않도록 테스트 타깃에 둔다.
+extension Result where Success == Void, Failure == RuleError {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        switch (lhs, rhs) {
+        case (.success, .success): true
+        case (.failure(let a), .failure(let b)): a == b
+        default: false
+        }
+    }
+}
+```
+
+옮긴 뒤 기존 33개 테스트가 그대로 통과하는지 확인한다:
+
+```bash
+swift test --package-path "Packages/YachtCore"
+```
+Expected: PASS (33 tests). 컴파일이 깨지면 `ValidationTests.swift`가 `@testable import`를 쓰고 있는지 확인한다.
+
+- [ ] **Step 2: 전수 검증 테스트 작성**
 
 `Packages/YachtCore/Tests/YachtCoreTests/ExhaustiveScoringTests.swift`:
 
@@ -1559,14 +1602,14 @@ struct ExhaustiveScoringTests {
                 weighted += s * (rollIndex % 97 + 1) * (categoryIndex + 1)
             }
         }
-        // 최초 실행에서 나온 값을 여기에 박아 넣는다 (Step 3 참고).
+        // 최초 실행에서 나온 값을 여기에 박아 넣는다 (Step 4 참고).
         #expect(sum == 0, "GOLDEN_SUM 자리표시자 — Step 3에서 실제 값으로 교체한다")
         #expect(weighted == 0, "GOLDEN_WEIGHTED 자리표시자 — Step 3에서 실제 값으로 교체한다")
     }
 }
 ```
 
-- [ ] **Step 2: 실행해서 독립 구현 대조와 불변식이 통과하는지 확인**
+- [ ] **Step 3: 실행해서 독립 구현 대조와 불변식이 통과하는지 확인**
 
 ```bash
 swift test --package-path "Packages/YachtCore" --filter ExhaustiveScoringTests
@@ -1575,18 +1618,18 @@ Expected: `독립_구현_대조`와 `불변식`은 PASS, `골든_체크섬`은 F
 
 만약 `독립_구현_대조`가 실패하면 **구현과 독립 구현 중 어느 쪽이 스펙 §4.2 표와 맞는지 표를 보고 판정한 뒤** 틀린 쪽을 고친다. 테스트를 구현에 맞추지 않는다.
 
-- [ ] **Step 3: 골든 값을 실제 값으로 교체**
+- [ ] **Step 4: 골든 값을 실제 값으로 교체**
 
-Step 2의 실패 메시지에 나온 `sum`, `weighted` 실제 값을 테스트에 박아 넣고 메시지를 바꾼다:
+Step 3의 실패 메시지에 나온 `sum`, `weighted` 실제 값을 테스트에 박아 넣고 메시지를 바꾼다:
 
 ```swift
         #expect(sum == 1234567, "점수표 총합이 바뀌었다 — 규칙을 의도적으로 바꾼 게 아니면 회귀다")
         #expect(weighted == 987654321, "점수표 가중합이 바뀌었다 — 규칙을 의도적으로 바꾼 게 아니면 회귀다")
 ```
 
-(위 숫자는 예시다. Step 2가 출력한 실제 값을 쓴다.)
+(위 숫자는 예시다. Step 3이 출력한 실제 값을 쓴다.)
 
-- [ ] **Step 4: 게임 불변식 테스트 작성**
+- [ ] **Step 5: 게임 불변식 테스트 작성**
 
 `Packages/YachtCore/Tests/YachtCoreTests/GameInvariantTests.swift`:
 
@@ -1708,14 +1751,14 @@ struct GameInvariantTests {
 }
 ```
 
-- [ ] **Step 5: 전체 테스트 실행**
+- [ ] **Step 6: 전체 테스트 실행**
 
 ```bash
 swift test --package-path "Packages/YachtCore"
 ```
 Expected: PASS (전체). 전수 검증 때문에 수 초가 걸릴 수 있다.
 
-- [ ] **Step 6: 커밋**
+- [ ] **Step 7: 커밋**
 
 ```bash
 git add Packages/YachtCore
