@@ -88,7 +88,7 @@ struct GameStateTests {
     func 전부_기록됨() {
         var s = GameState(playerCount: 1)
         #expect(s.isAllScored == false)
-        for c in Category.allCases {
+        for c in ScoreCategory.allCases {
             s = s.applying(.rolled([1, 1, 1, 1, 1])).applying(.committed(c, 0)).applying(.turnAdvanced)
         }
         #expect(s.isAllScored == true)

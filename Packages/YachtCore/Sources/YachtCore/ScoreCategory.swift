@@ -1,14 +1,14 @@
 import Foundation
 
 /// 야추 12 카테고리. 점수 규칙은 스펙 §4.2 표가 유일한 근거다.
-public enum Category: String, CaseIterable, Codable, Hashable, Sendable {
+public enum ScoreCategory: String, CaseIterable, Codable, Hashable, Sendable {
     case aces, deuces, threes, fours, fives, sixes
     case choice, fourOfAKind, fullHouse, smallStraight, largeStraight, yacht
 
     /// 상단 소계와 63점 보너스에 들어가는 6개.
-    public static let upperCases: [Category] = [.aces, .deuces, .threes, .fours, .fives, .sixes]
+    public static let upperCases: [ScoreCategory] = [.aces, .deuces, .threes, .fours, .fives, .sixes]
 
-    public var isUpper: Bool { Category.upperCases.contains(self) }
+    public var isUpper: Bool { ScoreCategory.upperCases.contains(self) }
 
     /// 이 카테고리에 이 주사위를 기록했을 때의 점수. 조건을 못 채우면 0이다.
     public func score(_ dice: [Int]) -> Int {

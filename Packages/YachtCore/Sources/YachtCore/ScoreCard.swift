@@ -5,21 +5,21 @@ public struct ScoreCard: Equatable, Codable, Sendable {
     public static let upperBonusThreshold = 63
     public static let upperBonusPoints = 35
 
-    private var entries: [Category: Int]
+    private var entries: [ScoreCategory: Int]
 
     public init() { entries = [:] }
 
-    public func entry(_ category: Category) -> Int? { entries[category] }
-    public func isFilled(_ category: Category) -> Bool { entries[category] != nil }
+    public func entry(_ category: ScoreCategory) -> Int? { entries[category] }
+    public func isFilled(_ category: ScoreCategory) -> Bool { entries[category] != nil }
 
     /// 0점(scratch)도 기록으로 센다. 같은 칸을 두 번 기록하는 것은 호출자의 버그다.
-    public mutating func record(_ category: Category, _ points: Int) {
+    public mutating func record(_ category: ScoreCategory, _ points: Int) {
         precondition(entries[category] == nil, "이미 기록된 카테고리다: \(category)")
         entries[category] = points
     }
 
     public var upperSubtotal: Int {
-        Category.upperCases.reduce(0) { $0 + (entries[$1] ?? 0) }
+        ScoreCategory.upperCases.reduce(0) { $0 + (entries[$1] ?? 0) }
     }
 
     /// 소계가 63에 도달하는 즉시 확정된다. 12턴 종료를 기다리지 않는다.
@@ -29,7 +29,7 @@ public struct ScoreCard: Equatable, Codable, Sendable {
 
     public var total: Int { entries.values.reduce(0, +) + upperBonus }
 
-    public var isComplete: Bool { entries.count == Category.allCases.count }
+    public var isComplete: Bool { entries.count == ScoreCategory.allCases.count }
 
-    public var openCategories: [Category] { Category.allCases.filter { entries[$0] == nil } }
+    public var openCategories: [ScoreCategory] { ScoreCategory.allCases.filter { entries[$0] == nil } }
 }

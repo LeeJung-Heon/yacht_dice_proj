@@ -27,7 +27,7 @@ struct ScoreCardTests {
     @Test("상단 소계가 63 미만이면 보너스가 없다")
     func 보너스_미달() {
         var card = ScoreCard()
-        for c in Category.upperCases { card.record(c, 10) }   // 60
+        for c in ScoreCategory.upperCases { card.record(c, 10) }   // 60
         #expect(card.upperSubtotal == 60)
         #expect(card.upperBonus == 0)
         #expect(card.total == 60)
@@ -36,7 +36,7 @@ struct ScoreCardTests {
     @Test("상단 소계가 정확히 63이면 보너스 35가 붙는다")
     func 보너스_경계() {
         var card = ScoreCard()
-        for (i, c) in Category.upperCases.enumerated() { card.record(c, i == 0 ? 13 : 10) }   // 63
+        for (i, c) in ScoreCategory.upperCases.enumerated() { card.record(c, i == 0 ? 13 : 10) }   // 63
         #expect(card.upperSubtotal == 63)
         #expect(card.upperBonus == 35)
         #expect(card.total == 63 + 35)
@@ -54,7 +54,7 @@ struct ScoreCardTests {
     @Test("12칸을 모두 채우면 완성이다")
     func 완성() {
         var card = ScoreCard()
-        for c in Category.allCases { card.record(c, 0) }
+        for c in ScoreCategory.allCases { card.record(c, 0) }
         #expect(card.isComplete == true)
     }
 

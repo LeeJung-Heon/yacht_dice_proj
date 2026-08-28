@@ -14,7 +14,7 @@ private let allRolls: [[Int]] = {
 /// 프로덕션 구현과 **알고리즘이 다른** 순진한 채점기.
 /// 프로덕션이 counts 배열과 Set을 쓰는 데 비해 이쪽은 정렬과 문자열 매칭을 쓴다.
 /// 두 구현이 우연히 같은 실수를 하기 어렵게 만드는 것이 목적이다.
-private func naiveScore(_ category: Category, _ dice: [Int]) -> Int {
+private func naiveScore(_ category: ScoreCategory, _ dice: [Int]) -> Int {
     let sorted = dice.sorted()
     let total = sorted.reduce(0, +)
 
@@ -62,7 +62,7 @@ struct ExhaustiveScoringTests {
         var mismatches: [String] = []
         var checked = 0
         for dice in allRolls {
-            for category in Category.allCases {
+            for category in ScoreCategory.allCases {
                 checked += 1
                 let mine = category.score(dice)
                 let theirs = naiveScore(category, dice)
@@ -81,32 +81,32 @@ struct ExhaustiveScoringTests {
             let total = dice.reduce(0, +)
 
             // Choice는 언제나 총합이다
-            #expect(Category.choice.score(dice) == total)
+            #expect(ScoreCategory.choice.score(dice) == total)
 
             // 라지 스트레이트가 성립하면 스몰도 성립한다
-            if Category.largeStraight.score(dice) == 30 {
-                #expect(Category.smallStraight.score(dice) == 15, "라지인데 스몰이 아니다: \(dice)")
+            if ScoreCategory.largeStraight.score(dice) == 30 {
+                #expect(ScoreCategory.smallStraight.score(dice) == 15, "라지인데 스몰이 아니다: \(dice)")
             }
 
             // 야추가 성립하면 4 of a Kind와 Full House도 성립한다
-            if Category.yacht.score(dice) == 50 {
-                #expect(Category.fourOfAKind.score(dice) == total, "야추인데 포카인드가 아니다: \(dice)")
-                #expect(Category.fullHouse.score(dice) == total, "야추인데 풀하우스가 아니다: \(dice)")
+            if ScoreCategory.yacht.score(dice) == 50 {
+                #expect(ScoreCategory.fourOfAKind.score(dice) == total, "야추인데 포카인드가 아니다: \(dice)")
+                #expect(ScoreCategory.fullHouse.score(dice) == total, "야추인데 풀하우스가 아니다: \(dice)")
             }
 
             // 총합형 카테고리는 0이거나 정확히 총합이다 — 부분합이 나오면 안 된다
-            for category in [Category.fourOfAKind, .fullHouse] {
+            for category in [ScoreCategory.fourOfAKind, .fullHouse] {
                 let s = category.score(dice)
                 #expect(s == 0 || s == total, "\(category)가 부분합 \(s)를 냈다: \(dice)")
             }
 
             // 고정 점수형은 0이거나 정해진 값이다
-            #expect([0, 15].contains(Category.smallStraight.score(dice)))
-            #expect([0, 30].contains(Category.largeStraight.score(dice)))
-            #expect([0, 50].contains(Category.yacht.score(dice)))
+            #expect([0, 15].contains(ScoreCategory.smallStraight.score(dice)))
+            #expect([0, 30].contains(ScoreCategory.largeStraight.score(dice)))
+            #expect([0, 50].contains(ScoreCategory.yacht.score(dice)))
 
             // 상단은 해당 눈 개수 x 눈값이므로 5 x 눈값을 넘을 수 없다
-            for (index, category) in Category.upperCases.enumerated() {
+            for (index, category) in ScoreCategory.upperCases.enumerated() {
                 let face = index + 1
                 let s = category.score(dice)
                 #expect(s % face == 0 && s <= 5 * face, "\(category)가 \(s)를 냈다: \(dice)")
@@ -123,7 +123,7 @@ struct ExhaustiveScoringTests {
         var sum = 0
         var weighted = 0
         for (rollIndex, dice) in allRolls.enumerated() {
-            for (categoryIndex, category) in Category.allCases.enumerated() {
+            for (categoryIndex, category) in ScoreCategory.allCases.enumerated() {
                 let s = category.score(dice)
                 sum += s
                 weighted += s * (rollIndex % 97 + 1) * (categoryIndex + 1)

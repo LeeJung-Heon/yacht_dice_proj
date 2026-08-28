@@ -4,7 +4,7 @@ import Foundation
 public enum Intent: Equatable, Sendable {
     case roll
     case toggleHold(Int)
-    case commit(Category)
+    case commit(ScoreCategory)
 }
 
 public enum RuleError: Error, Equatable, Sendable {
@@ -12,6 +12,6 @@ public enum RuleError: Error, Equatable, Sendable {
     case noRollsRemaining
     case allDiceHeld
     case mustRollFirst
-    case categoryAlreadyUsed(Category)
+    case categoryAlreadyUsed(ScoreCategory)
     case indexOutOfRange(Int)
 }

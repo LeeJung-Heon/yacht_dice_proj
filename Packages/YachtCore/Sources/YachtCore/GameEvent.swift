@@ -18,7 +18,7 @@ public enum Event: Equatable, Codable, Sendable {
     /// 배열 길이는 항상 rollableIndices.count 와 같아야 한다.
     case rolled([Int])
     case holdToggled(Int)
-    case committed(Category, Int)
+    case committed(ScoreCategory, Int)
     case turnAdvanced
     case gameEnded
 }

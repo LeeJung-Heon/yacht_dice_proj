@@ -62,7 +62,7 @@ struct GameInvariantTests {
     func 총점_일관성(seed: Int) {
         let (state, _) = playRandomGame(seed: UInt64(seed), playerCount: 2)
         for card in state.scorecards {
-            let itemSum = Category.allCases.reduce(0) { $0 + (card.entry($1) ?? 0) }
+            let itemSum = ScoreCategory.allCases.reduce(0) { $0 + (card.entry($1) ?? 0) }
             let expectedBonus = card.upperSubtotal >= ScoreCard.upperBonusThreshold ? 35 : 0
             #expect(card.upperBonus == expectedBonus)
             #expect(card.total == itemSum + expectedBonus)
