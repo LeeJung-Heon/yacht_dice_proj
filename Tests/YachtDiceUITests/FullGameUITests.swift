@@ -31,6 +31,19 @@ final class FullGameUITests: XCTestCase {
         }
 
         XCTAssertTrue(app.staticTexts["게임 종료"].waitForExistence(timeout: 10), "12턴 뒤에 게임이 끝나지 않았다")
+
+        // 최종 점수가 보이고, 거기서 새 판을 시작할 수 있어야 한다.
+        // 이게 없으면 앱을 강제 종료하는 것 말고는 새 게임을 시작할 방법이 없다.
+        let total = app.staticTexts["result.total"]
+        XCTAssertTrue(total.waitForExistence(timeout: 5), "최종 점수가 보이지 않는다")
+        let newGame = app.buttons["action.newGame"]
+        XCTAssertTrue(newGame.waitForHittable(timeout: 5), "새 게임 버튼을 누를 수 없다")
+        newGame.tap()
+
+        XCTAssertTrue(app.otherElements["header.turn"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.otherElements["header.turn"].label, "Turn 1/12", "새 게임이 1턴에서 시작하지 않았다")
+        XCTAssertTrue(roll.waitForHittable(timeout: 5), "새 게임에서 Roll을 누를 수 없다")
+        XCTAssertFalse(app.staticTexts["게임 종료"].exists, "새 게임인데 종료 표시가 남아 있다")
     }
 
     /// 앱을 재시작해도 진행이 남는다. P1 완료 기준의 다섯 번째 항목이다.

@@ -86,6 +86,41 @@ struct GameSessionTests {
         #expect(session.visibleState.scorecards[0].isComplete)
     }
 
+    @Test("끝난 판에서 새 게임을 시작할 수 있다")
+    func 새_게임() async throws {
+        let session = try makeSession(script: [[1, 2, 3, 4, 5]])
+        for _ in 0..<12 {
+            await session.send(.roll)
+            await session.send(.commit(session.visibleState.scorecards[0].openCategories[0]))
+        }
+        #expect(session.visibleState.phase == .finished)
+        let finalScore = session.visibleState.scorecards[0].total
+        #expect(finalScore > 0, "최종 점수를 보여줄 수 없다")
+
+        let recorder = LogRecorder()
+        session.onLogChanged = { recorder.record($0) }
+        session.startNewGame()
+
+        #expect(session.visibleState.phase == .awaitingFirstRoll)
+        #expect(session.visibleState.turnIndex == 1)
+        #expect(session.visibleState.scorecards[0].total == 0)
+        #expect(session.visibleState.scorecards[0].openCategories.count == ScoreCategory.allCases.count)
+        #expect(session.visibleState.allows(.roll), "새 판에서 굴릴 수 없다")
+        #expect(recorder.count == 1, "새 판이 저장 훅에 통지되지 않았다")
+
+        await session.send(.roll)
+        #expect(session.visibleState.dice == [1, 2, 3, 4, 5])
+    }
+
+    @Test("게임이 끝나지 않았으면 새 게임 요청을 무시한다")
+    func 새_게임_거부() async throws {
+        let session = try makeSession(script: [[1, 2, 3, 4, 5]])
+        await session.send(.roll)
+        let before = session.visibleState
+        session.startNewGame()
+        #expect(session.visibleState == before, "진행 중인 판이 초기화됐다")
+    }
+
     @Test("Assist가 켜져 있으면 예상 점수를 준다")
     func 예상_점수() async throws {
         let session = try makeSession(script: [[5, 5, 5, 5, 5]])

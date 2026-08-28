@@ -56,6 +56,17 @@ final class GameSession {
         }
     }
 
+    /// 끝난 판을 접고 새 판을 시작한다.
+    /// 저장 파일은 MatchStore.save가 게임 종료 시점에 이미 지웠으므로 로그만 갈아끼우면 된다.
+    func startNewGame() {
+        guard !isBusy, visibleState.phase == .finished else { return }
+        log = MatchLog(playerCount: log.playerCount)
+        visibleState = log.state
+        nextThrowDirection = nil
+        stage.reset()
+        onLogChanged?(log)
+    }
+
     /// Assist가 켜져 있고 아직 비어 있는 칸에 대해서만 예상 점수를 준다.
     func previewScore(_ category: ScoreCategory) -> Int? {
         guard assistEnabled,

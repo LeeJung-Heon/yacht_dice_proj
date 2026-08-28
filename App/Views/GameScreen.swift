@@ -16,8 +16,14 @@ struct GameScreen: View {
                     .frame(height: geometry.size.height * 0.42)
                     .contentShape(Rectangle())
                     .gesture(throwGesture)
-                ActionBarView(session: session)
-                    .padding(.vertical, 10)
+                Group {
+                    if session.visibleState.phase == .finished {
+                        GameOverBar(session: session)
+                    } else {
+                        ActionBarView(session: session)
+                    }
+                }
+                .padding(.vertical, 10)
                 Divider()
                 ScrollView {
                     ScoreboardView(session: session)
