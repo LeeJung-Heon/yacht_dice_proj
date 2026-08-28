@@ -90,6 +90,19 @@ struct TrajectoryArchiveTests {
         }
     }
 
+    @Test("헤더가 터무니없는 개수를 주장하면 할당 전에 거부한다")
+    func 개수_상한() throws {
+        // 유효한 아카이브의 헤더 개수 필드만 UInt32.max로 바꾼다.
+        var data = try TrajectoryArchive.encode([makeTrajectory()])
+        let countOffset = 6   // magic 4 + version 2
+        for (index, byte) in [UInt8](repeating: 0xFF, count: 4).enumerated() {
+            data[countOffset + index] = byte
+        }
+        #expect(throws: TrajectoryArchive.Failure.tooManyTrajectories(UInt32.max)) {
+            try TrajectoryArchive.decode(data)
+        }
+    }
+
     @Test("포맷 버전이 다르면 디코딩이 실패한다")
     func 버전_불일치() throws {
         var data = try TrajectoryArchive.encode([makeTrajectory()])

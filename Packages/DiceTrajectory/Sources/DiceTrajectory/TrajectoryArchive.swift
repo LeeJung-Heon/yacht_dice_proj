@@ -22,6 +22,7 @@ public enum TrajectoryArchive {
         case unsupportedVersion(UInt16)
         case truncated(at: Int)
         case restUpFaceOutOfRange(UInt8)
+        case tooManyTrajectories(UInt32)
     }
 
     public static func encode(_ trajectories: [Trajectory]) throws -> Data {
@@ -73,6 +74,11 @@ public enum TrajectoryArchive {
         let fileVersion: UInt16 = try data.readLE(at: &cursor)
         guard fileVersion == version else { throw Failure.unsupportedVersion(fileVersion) }
         let count: UInt32 = try data.readLE(at: &cursor)
+
+        // 헤더의 개수를 믿고 미리 할당하면 손상된 파일 하나가 앱 실행 시점에
+        // 거대한 할당을 시도한다. 실제 상한(1~5개 x 방향 3종 x 변형 수십 개)의
+        // 넉넉한 몇 배로 자른다.
+        guard count <= 10_000 else { throw Failure.tooManyTrajectories(count) }
 
         var out: [Trajectory] = []
         out.reserveCapacity(Int(count))
