@@ -11,12 +11,15 @@ final class DiceStage {
     private let library: TrajectoryLibrary
     private var root = Entity()
     private var dice: [ModelEntity] = []
-    private(set) var isAnimating = false
+    /// 각 주사위가 트레이 바닥에서 마지막으로 있던 자리.
+    /// keep을 풀었을 때 어디로 돌려보낼지는 이것 말고는 알 방법이 없다.
+    private var floorPositions: [SIMD3<Float>] = []
 
     init(library: TrajectoryLibrary) {
         self.library = library
         root = DiceSceneBuilder.makeRoot()
         dice = DiceSceneBuilder.dice(in: root)
+        floorPositions = (0..<dice.count).map(DiceSceneBuilder.restingPosition(slot:))
     }
 
     // 이 SDK(iOS 26)에서 `RealityView`는 `RealityViewCameraContent`만 제공하고
@@ -52,9 +55,10 @@ final class DiceStage {
         guard !slots.isEmpty else { return [] }
 
         var generator = SystemRandomNumberGenerator()
+        // 굴리는 개수 1~5 × 방향 3종 = 15가지 조합 모두에 최소 20개씩 들어 있다는 것을
+        // TrajectoryLibraryTests.변형_다양성이 번들 파일에 대해 보장한다.
         guard let trajectory = library.pick(dieCount: slots.count, direction: direction, using: &generator) else {
-            // 궤적이 없으면 애니메이션 없이 결과만 앉힌다. 게임이 멈추는 것보다 낫다.
-            settleImmediately(values: values, slots: slots, generator: &generator)
+            assertionFailure("\(slots.count)개 / \(direction) 궤적이 번들에 없다")
             return []
         }
 
@@ -71,9 +75,6 @@ final class DiceStage {
             return trajectory.collisions
         }
 
-        isAnimating = true
-        defer { isAnimating = false }
-
         let frameDuration = Duration.seconds(1.0 / Double(trajectory.frameRate))
         var clock = ContinuousClock.now
         for frame in 0..<trajectory.frameCount {
@@ -86,25 +87,35 @@ final class DiceStage {
         return trajectory.collisions
     }
 
-    /// keep한 주사위를 트레이 상단 선반으로 올린다.
+    /// 다섯 개 전부의 자리를 정한다 — keep한 것은 뒤쪽 선반 위로, 나머지는 트레이 바닥으로.
+    ///
+    /// keep을 푼 주사위까지 여기서 책임지지 않으면 그 주사위는 다음 굴림의 applyFrame이
+    /// 집어갈 때까지 선반에 남는다. 선반이 화면 밖이던 동안에는 티가 안 났지만,
+    /// 선반이 보이는 지금은 "keep을 풀었는데 그대로 올라가 있는" 상태가 그대로 보인다.
     func placeHeld(_ heldSlots: [Int], values: [Int]) {
+        let held = Set(heldSlots)
+        let sorted = heldSlots.sorted()
         let spacing = TrayGeometry.dieSize * 1.9
-        for (order, slot) in heldSlots.sorted().enumerated() {
+
+        for (order, slot) in sorted.enumerated() {
             guard dice.indices.contains(slot) else { continue }
-            let x = (Float(order) - Float(heldSlots.count - 1) / 2) * spacing
-            dice[slot].position = [x, TrayGeometry.shelfHeight, -TrayGeometry.trayInner.z / 2 - 0.02]
+            let x = (Float(order) - Float(sorted.count - 1) / 2) * spacing
+            dice[slot].position = [x, TrayGeometry.shelfDieY, TrayGeometry.shelfDieZ]
             // 선반 위에서는 눈이 정면에서 잘 보이도록 축정렬 자세를 유지한다
-            if let target = OctahedralGroup.elements.first(where: { DieFace.upValue(for: $0) == values[slot] }) {
+            if values.indices.contains(slot),
+               let target = OctahedralGroup.elements.first(where: { DieFace.upValue(for: $0) == values[slot] }) {
                 dice[slot].orientation = target
             }
         }
+
+        seatOnFloor(dice.indices.filter { !held.contains($0) })
     }
 
     func reset() {
         for (index, die) in dice.enumerated() {
-            die.isEnabled = true
-            die.position = [Float(index - 2) * TrayGeometry.dieSize * 1.6, TrayGeometry.dieSize / 2, 0]
+            die.position = DiceSceneBuilder.restingPosition(slot: index)
             die.orientation = OctahedralGroup.elements[0]
+            floorPositions[index] = die.position
         }
     }
 
@@ -117,16 +128,40 @@ final class DiceStage {
             let pose = trajectory.posed(die: lane, frame: frame, offset: offsets[lane])
             dice[slot].position = pose.position
             dice[slot].orientation = pose.orientation
+            floorPositions[slot] = pose.position
         }
     }
 
-    private func settleImmediately(values: [Int], slots: [Int],
-                                   generator: inout some RandomNumberGenerator) {
-        for (lane, slot) in slots.enumerated() {
-            guard dice.indices.contains(slot) else { continue }
-            let candidates = OctahedralGroup.elements.filter { DieFace.upValue(for: $0) == values[lane] }
-            dice[slot].orientation = candidates[Int.random(in: 0..<candidates.count, using: &generator)]
-            dice[slot].position = [Float(slot - 2) * TrayGeometry.dieSize * 1.6, TrayGeometry.dieSize / 2, 0]
+    /// 바닥에 있어야 할 주사위를 마지막 바닥 위치로 되돌린다.
+    /// 이미 바닥에 있는 것부터 자리를 확정하고, 선반에서 내려오는 것은 그 뒤에 끼워 넣는다 —
+    /// 굴림이 끝난 배치를 흔들지 않기 위해서다.
+    private func seatOnFloor(_ slots: [Int]) {
+        let alreadyDown = slots.filter { dice[$0].position.y < TrayGeometry.shelfTop }
+        let comingDown = slots.filter { dice[$0].position.y >= TrayGeometry.shelfTop }
+        var taken: [SIMD3<Float>] = []
+        for slot in alreadyDown + comingDown {
+            let seat = clearSeat(floorPositions[slot], avoiding: taken)
+            dice[slot].position = seat
+            floorPositions[slot] = seat
+            taken.append(seat)
         }
+    }
+
+    /// 되돌릴 자리에 다른 주사위가 이미 있으면 x축으로 좌우 번갈아 밀어낸다.
+    private func clearSeat(_ wanted: SIMD3<Float>, avoiding taken: [SIMD3<Float>]) -> SIMD3<Float> {
+        let step = TrayGeometry.dieSize * 1.15
+        let limit = TrayGeometry.trayInner.x / 2 - TrayGeometry.dieSize / 2
+        var candidate = wanted
+        for attempt in 0..<12 {
+            if !taken.contains(where: { overlaps($0, candidate) }) { return candidate }
+            let shift = Float(attempt / 2 + 1) * step * (attempt.isMultiple(of: 2) ? 1 : -1)
+            candidate = wanted
+            candidate.x = min(limit, max(-limit, wanted.x + shift))
+        }
+        return candidate
+    }
+
+    private func overlaps(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Bool {
+        abs(a.x - b.x) < TrayGeometry.dieSize && abs(a.z - b.z) < TrayGeometry.dieSize
     }
 }

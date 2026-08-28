@@ -45,7 +45,6 @@ struct DiceStageTests {
         _ = await stage.roll(values: [1, 1, 1, 1, 1], slots: [0, 1, 2, 3, 4],
                              direction: .center, skipAnimation: true)
         #expect(ContinuousClock.now - start < .milliseconds(200))
-        #expect(stage.isAnimating == false)
     }
 
     @Test("같은 눈을 여러 번 굴려도 자세가 매번 같지 않다")

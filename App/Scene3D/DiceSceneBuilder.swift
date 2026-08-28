@@ -34,10 +34,16 @@ enum DiceSceneBuilder {
     static func makeCamera() -> Entity {
         let camera = Entity()
         var component = PerspectiveCameraComponent()
-        component.fieldOfViewInDegrees = 42
+        component.fieldOfViewInDegrees = 32
         camera.components.set(component)
-        // 레퍼런스와 같은 약 55도 부감
-        camera.look(at: [0, 0, 0], from: [0, 0.42, 0.30], relativeTo: nil)
+        // 레퍼런스와 같은 약 55도 부감. 거리와 화각은 트레이 안쪽이 화면을 채우도록 좁혔다 —
+        // 예전 값(0.42/0.30, 42도)은 바깥 벽과 테이블까지 담느라 주사위가 화면 높이의
+        // 4%밖에 안 됐다. 지금 값에서는 6.3%다.
+        //
+        // 구운 궤적 593개의 정지 위치 전부를 이 카메라로 투영해 확인했다:
+        // NDC |x| ≤ 0.95, |y| ≤ 0.90 (세로 화면 비율 1.20~1.40 전 구간). keep 선반은 y ≈ 0.71,
+        // 가장 뒤에서 멈춘 주사위는 y ≈ 0.44라 선반과 바닥이 확실히 갈라져 보인다.
+        camera.look(at: [0, 0, 0], from: [0, 0.369, 0.258], relativeTo: nil)
         return camera
     }
 
@@ -79,18 +85,37 @@ enum DiceSceneBuilder {
         floor.position = [0, -t / 2, 0]
         tray.addChild(floor)
 
+        // 벽은 물리 높이(inner.y)가 아니라 눈에 보이는 테두리 높이로 그린다 — 이유는
+        // TrayGeometry.visualWallHeight 주석 참고. 물리 궤적은 여전히 0.12 상자에서 구웠다.
+        let h = TrayGeometry.visualWallHeight
         let walls: [(SIMD3<Float>, SIMD3<Float>)] = [
-            ([inner.x + 2 * t, inner.y, t], [0, inner.y / 2,  (inner.z + t) / 2]),
-            ([inner.x + 2 * t, inner.y, t], [0, inner.y / 2, -(inner.z + t) / 2]),
-            ([t, inner.y, inner.z], [ (inner.x + t) / 2, inner.y / 2, 0]),
-            ([t, inner.y, inner.z], [-(inner.x + t) / 2, inner.y / 2, 0]),
+            ([inner.x + 2 * t, h, t], [0, h / 2,  (inner.z + t) / 2]),
+            ([inner.x + 2 * t, h, t], [0, h / 2, -(inner.z + t) / 2]),
+            ([t, h, inner.z], [ (inner.x + t) / 2, h / 2, 0]),
+            ([t, h, inner.z], [-(inner.x + t) / 2, h / 2, 0]),
         ]
         for (size, offset) in walls {
             let wall = ModelEntity(mesh: .generateBox(size: size), materials: [rim])
             wall.position = offset
             tray.addChild(wall)
         }
+
+        tray.addChild(makeShelf(material: rim))
         return tray
+    }
+
+    /// keep한 주사위가 올라앉는 선반. 트레이 뒤쪽 벽에 붙은 턱이다.
+    /// 굴러간 주사위가 절대 멈추지 않는 띠 위에 놓으므로 둘이 겹칠 일이 없다
+    /// (TrayGeometry.shelfFrontZ 주석 참고).
+    private static func makeShelf(material: PhysicallyBasedMaterial) -> ModelEntity {
+        let depth = TrayGeometry.shelfFrontZ - TrayGeometry.shelfBackZ
+        let shelf = ModelEntity(
+            mesh: .generateBox(size: [TrayGeometry.trayInner.x, TrayGeometry.shelfTop, depth],
+                               cornerRadius: 0.001),
+            materials: [material])
+        shelf.name = "shelf"
+        shelf.position = [0, TrayGeometry.shelfTop / 2, TrayGeometry.shelfDieZ]
+        return shelf
     }
 
     /// 주사위 하나의 메시. 면을 6개 파트로 쪼개서 파트마다 다른 눈 텍스처를 붙일 수 있게 한다.
