@@ -23,9 +23,20 @@ targets:
     type: application
     platform: iOS
     sources: [App]
+    settings:
+      base:
+        # 세로 전용 iPhone 앱이다. 비워두면 iPad(2)까지 포함돼 UIDeviceFamily가
+        # [1, 2]가 되고, Release 빌드가 "모든 방향을 지원해야 한다"고 경고한다.
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: App/Info.plist
       properties:
+        # 한국어 UI다. 비워두면 $(DEVELOPMENT_LANGUAGE)가 en으로 풀린다.
+        CFBundleDevelopmentRegion: ko
+        CFBundleDisplayName: 요트 다이스
+        # 암호화를 쓰지 않는다. 없으면 업로드할 때마다 App Store Connect가 묻는다.
+        ITSAppUsesNonExemptEncryption: false
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
