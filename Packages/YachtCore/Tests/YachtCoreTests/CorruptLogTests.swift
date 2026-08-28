@@ -12,6 +12,15 @@ struct CorruptLogTests {
         return try log.encoded()
     }
 
+    /// JSON 직렬화를 통해 playerCount를 임의로 설정한다 (precondition 우회).
+    /// 매우 큰 playerCount로 인한 할당 실패를 테스트하기 위해 필요하다.
+    private func encodedLogWithArbitraryPlayerCount(_ playerCount: Int) throws -> Data {
+        var log = MatchLog(playerCount: 1)
+        var json = try JSONSerialization.jsonObject(with: log.encoded()) as! [String: Any]
+        json["playerCount"] = playerCount
+        return try JSONSerialization.data(withJSONObject: json)
+    }
+
     @Test("정상 로그는 그대로 디코딩된다")
     func 정상_로그() throws {
         let data = try encodedLog(playerCount: 1, events: [.rolled([1, 2, 3, 4, 5]), .committed(.choice, 15)])
@@ -74,5 +83,36 @@ struct CorruptLogTests {
         _ = state.canApply(.holdToggled(99))
         _ = state.canApply(.committed(.aces, 1))
         #expect(state == before)
+    }
+
+    @Test("playerCount가 maxPlayers보다 크면 거부한다")
+    func 플레이어_수_초과() throws {
+        let data = try encodedLogWithArbitraryPlayerCount(5)
+        #expect(throws: MatchLog.DecodingFailure.invalidPlayerCount(5)) {
+            try MatchLog.decoded(from: data)
+        }
+    }
+
+    @Test("playerCount = Int.max는 할당 실패 없이 throw로 거부된다")
+    func 플레이어_수_매우_큼_intmax() throws {
+        let data = try encodedLogWithArbitraryPlayerCount(Int.max)
+        #expect(throws: MatchLog.DecodingFailure.invalidPlayerCount(Int.max)) {
+            try MatchLog.decoded(from: data)
+        }
+    }
+
+    @Test("playerCount = 10억은 할당 실패 없이 throw로 거부된다")
+    func 플레이어_수_매우_큼_10억() throws {
+        let data = try encodedLogWithArbitraryPlayerCount(10_000_000_000)
+        #expect(throws: MatchLog.DecodingFailure.invalidPlayerCount(10_000_000_000)) {
+            try MatchLog.decoded(from: data)
+        }
+    }
+
+    @Test("playerCount = 4는 여전히 수용된다")
+    func 플레이어_수_최대값_수용() throws {
+        let data = try encodedLog(playerCount: 4, events: [])
+        let restored = try MatchLog.decoded(from: data)
+        #expect(restored.playerCount == 4)
     }
 }

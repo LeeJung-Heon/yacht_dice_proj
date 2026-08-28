@@ -13,7 +13,8 @@ public struct GameState: Equatable, Codable, Sendable {
     public private(set) var phase: Phase
 
     public init(playerCount: Int = 1) {
-        precondition(playerCount >= 1, "플레이어는 최소 1명이다")
+        precondition((1...YachtCore.maxPlayers).contains(playerCount),
+                     "플레이어는 1...\(YachtCore.maxPlayers)명이다: \(playerCount)")
         self.playerCount = playerCount
         self.scorecards = Array(repeating: ScoreCard(), count: playerCount)
         self.currentPlayer = 0

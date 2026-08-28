@@ -42,7 +42,7 @@ public struct MatchLog: Equatable, Codable, Sendable {
         guard log.formatVersion == Self.formatVersion else {
             throw DecodingFailure.unsupportedVersion(log.formatVersion)
         }
-        guard log.playerCount >= 1 else {
+        guard (1...YachtCore.maxPlayers).contains(log.playerCount) else {
             throw DecodingFailure.invalidPlayerCount(log.playerCount)
         }
 
