@@ -104,17 +104,40 @@ public struct GameState: Equatable, Codable, Sendable {
     /// `applying(_:)`의 precondition들은 신뢰하는 호출자를 위한 불변식이라 위반하면 트랩을 낸다.
     /// 트랩은 잡을 수 없으므로, 손상된 저장 파일이 앱을 실행 즉시 죽이는 것을 막으려면
     /// 신뢰 경계에서 먼저 이 검사를 통과시켜야 한다. 부작용은 없다.
+    ///
+    /// 여기가 P3 온라인의 신뢰 경계이기도 하다. 그래서 "트랩만 막는" 수준이 아니라
+    /// validate(_:)와 같은 규칙 — phase, 남은 굴림 수, 그리고 committed의 점수까지 —
+    /// 를 전부 확인한다. points를 안 보면 조작된 로그의
+    /// `.committed(.yacht, 999999)`가 그대로 총점이 되고, rollsRemaining을 안 보면
+    /// 한 턴에 굴림을 무한히 넣을 수 있다. 로컬 전용인 지금은 사고에 그치지만
+    /// 온라인에서는 그대로 익스플로잇이다.
     public func canApply(_ event: Event) -> Bool {
+        guard phase != .finished else { return false }
+
         switch event {
         case .rolled(let values):
-            return values.count == rollableIndices.count
+            return rollsRemaining > 0
+                && !rollableIndices.isEmpty
+                && values.count == rollableIndices.count
                 && values.allSatisfy { (1...6).contains($0) }
+
         case .holdToggled(let index):
-            return (0..<YachtCore.diceCount).contains(index)
-        case .committed(let category, _):
-            return !scorecards[currentPlayer].isFilled(category)
-        case .turnAdvanced, .gameEnded:
-            return true
+            return phase == .rolling && (0..<YachtCore.diceCount).contains(index)
+
+        case .committed(let category, let points):
+            return phase == .rolling
+                && !scorecards[currentPlayer].isFilled(category)
+                && points == category.score(dice)
+
+        case .turnAdvanced:
+            // 턴 넘김은 기록 직후에만 나온다. 기록은 phase == .rolling을 요구하고
+            // committed는 phase를 바꾸지 않으므로, 여기서도 .rolling이어야 한다.
+            return phase == .rolling
+
+        case .gameEnded:
+            // 모든 칸이 찬 뒤에만. 그렇지 않으면 조작된 로그가 아무 때나
+            // 게임을 끝내 점수판을 얼려버릴 수 있다.
+            return phase == .rolling && isAllScored
         }
     }
 

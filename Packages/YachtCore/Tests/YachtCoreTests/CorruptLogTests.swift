@@ -115,4 +115,93 @@ struct CorruptLogTests {
         let restored = try MatchLog.decoded(from: data)
         #expect(restored.playerCount == 4)
     }
+
+    // MARK: - 신뢰 경계 (P3 온라인에서 그대로 쓰인다)
+
+    @Test("조작된 점수는 거부된다 — canApply가 points를 직접 채점한다")
+    func 조작된_점수() throws {
+        let data = try encodedLog(playerCount: 1, events: [
+            .rolled([1, 2, 3, 4, 5]), .committed(.yacht, 999_999),
+        ])
+        #expect(throws: MatchLog.DecodingFailure.corruptedLog(eventIndex: 1)) {
+            try MatchLog.decoded(from: data)
+        }
+    }
+
+    @Test("정직한 0점(scratch) 기록은 통과한다")
+    func 정직한_0점() throws {
+        let data = try encodedLog(playerCount: 1, events: [
+            .rolled([1, 2, 3, 4, 5]), .committed(.yacht, 0),
+        ])
+        let restored = try MatchLog.decoded(from: data)
+        #expect(restored.state.scorecards[0].entry(.yacht) == 0)
+    }
+
+    @Test("한 턴에 세 번보다 많이 굴린 로그를 거부한다")
+    func 굴림_횟수_초과() throws {
+        let roll = Event.rolled([1, 2, 3, 4, 5])
+        let data = try encodedLog(playerCount: 1, events: [roll, roll, roll, roll])
+        #expect(throws: MatchLog.DecodingFailure.corruptedLog(eventIndex: 3)) {
+            try MatchLog.decoded(from: data)
+        }
+    }
+
+    @Test("굴리기 전에 기록한 로그를 거부한다")
+    func 굴리지_않고_기록() throws {
+        let data = try encodedLog(playerCount: 1, events: [.committed(.aces, 0)])
+        #expect(throws: MatchLog.DecodingFailure.corruptedLog(eventIndex: 0)) {
+            try MatchLog.decoded(from: data)
+        }
+    }
+
+    @Test("굴리기 전에 홀드한 로그를 거부한다")
+    func 굴리지_않고_홀드() throws {
+        let data = try encodedLog(playerCount: 1, events: [.holdToggled(0)])
+        #expect(throws: MatchLog.DecodingFailure.corruptedLog(eventIndex: 0)) {
+            try MatchLog.decoded(from: data)
+        }
+    }
+
+    @Test("칸이 다 차기 전에 게임을 끝내는 로그를 거부한다")
+    func 이른_종료() throws {
+        let data = try encodedLog(playerCount: 1, events: [.rolled([1, 2, 3, 4, 5]), .gameEnded])
+        #expect(throws: MatchLog.DecodingFailure.corruptedLog(eventIndex: 1)) {
+            try MatchLog.decoded(from: data)
+        }
+    }
+
+    @Test("기록 없이 턴만 넘기는 로그를 거부한다")
+    func 빈_턴_넘김() throws {
+        let data = try encodedLog(playerCount: 1, events: [.turnAdvanced])
+        #expect(throws: MatchLog.DecodingFailure.corruptedLog(eventIndex: 0)) {
+            try MatchLog.decoded(from: data)
+        }
+    }
+
+    @Test("끝난 게임 뒤에 붙은 이벤트를 거부한다")
+    func 종료_후_이벤트() throws {
+        var events: [Event] = []
+        let scripted: [(ScoreCategory, [Int])] = [
+            (.aces, [1, 1, 1, 1, 1]), (.deuces, [2, 2, 2, 2, 2]),
+            (.threes, [3, 3, 3, 3, 3]), (.fours, [4, 4, 4, 4, 4]),
+            (.fives, [5, 5, 5, 5, 5]), (.sixes, [6, 6, 6, 6, 6]),
+            (.choice, [1, 2, 3, 4, 5]), (.fourOfAKind, [4, 4, 4, 4, 1]),
+            (.fullHouse, [2, 2, 2, 3, 3]), (.smallStraight, [1, 2, 3, 4, 6]),
+            (.largeStraight, [2, 3, 4, 5, 6]), (.yacht, [5, 5, 5, 5, 5]),
+        ]
+        for (index, step) in scripted.enumerated() {
+            events.append(.rolled(step.1))
+            events.append(.committed(step.0, step.0.score(step.1)))
+            events.append(index == scripted.count - 1 ? .gameEnded : .turnAdvanced)
+        }
+        // 여기까지는 정상이어야 한다
+        let clean = try encodedLog(playerCount: 1, events: events)
+        #expect(try MatchLog.decoded(from: clean).state.phase == .finished)
+
+        events.append(.rolled([1, 1, 1, 1, 1]))
+        let data = try encodedLog(playerCount: 1, events: events)
+        #expect(throws: MatchLog.DecodingFailure.corruptedLog(eventIndex: events.count - 1)) {
+            try MatchLog.decoded(from: data)
+        }
+    }
 }
