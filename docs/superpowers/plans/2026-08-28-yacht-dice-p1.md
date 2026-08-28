@@ -1670,6 +1670,35 @@ struct GameInvariantTests {
         #expect(replayed == state, "seed \(seed): 리플레이가 원본과 다르다 — P3 재접속이 깨진다")
     }
 
+    @Test("rolled는 keep되지 않은 슬롯에 인덱스 오름차순으로 채워진다")
+    func 슬롯_매핑_순서() {
+        // Task 5의 같은 이름 테스트는 [6,6,6]을 굴려서 순서를 검증하지 못한다.
+        // 값이 전부 같으면 내림차순으로 배정하는 버그도 통과한다. 서로 다른 값으로 다시 건다.
+        var state = GameState(playerCount: 1).applying(.rolled([1, 1, 1, 1, 1]))
+        state = state.applying(.holdToggled(1)).applying(.holdToggled(3))
+        #expect(state.rollableIndices == [0, 2, 4])
+
+        state = state.applying(.rolled([5, 2, 6]))
+        #expect(state.dice == [5, 1, 2, 1, 6], "슬롯 0←5, 2←2, 4←6이어야 한다")
+    }
+
+    @Test("commit은 0번이 아니라 현재 플레이어의 점수판에 기록된다")
+    func 커밋_대상_플레이어() {
+        // scorecards[0]으로 하드코딩하는 회귀를 잡는다.
+        // Task 5의 테스트는 2번 플레이어의 기록 내용을 확인하지 않는다.
+        var state = GameState(playerCount: 2)
+        state = state.applying(.rolled([1, 1, 1, 1, 1]))
+        state = state.applying(.committed(.aces, 5)).applying(.turnAdvanced)
+        #expect(state.currentPlayer == 1)
+
+        state = state.applying(.rolled([2, 2, 2, 2, 2]))
+        state = state.applying(.committed(.deuces, 10))
+
+        #expect(state.scorecards[1].entry(.deuces) == 10, "2번 플레이어 점수판에 들어가야 한다")
+        #expect(state.scorecards[0].entry(.deuces) == nil, "0번 플레이어 점수판이 오염됐다")
+        #expect(state.scorecards[0].entry(.aces) == 5)
+    }
+
     @Test("2인전은 각자 12턴을 갖는다", arguments: 1...20)
     func 턴_수(seed: Int) {
         let (_, log) = playRandomGame(seed: UInt64(seed), playerCount: 2)
