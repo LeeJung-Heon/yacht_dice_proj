@@ -20,6 +20,7 @@
 - 점수 규칙은 스펙 §4.2 표가 유일한 근거다. 4 of a Kind와 Full House는 **주사위 5개 총합**, S.Straight 15 고정, L.Straight 30 고정, Yacht 50 고정. 조커 룰 없음, 야추 추가 보너스 없음. Full House는 5개 동일도 인정한다.
 - 주사위 면 배치는 서양식 오른손 주사위: 로컬 +Y=1, -Y=6, +Z=2, -Z=5, +X=3, -X=4. 마주 보는 면의 합은 7이고 1·2·3이 한 꼭짓점을 반시계로 돈다.
 - 수익화 코드(IAP·광고·분석 SDK) 일절 없음.
+- **점수 카테고리 타입의 이름은 `ScoreCategory`다. `Category`로 되돌리지 말 것.** Foundation이 Objective-C 런타임의 `Category` 타입(`OpaquePointer`의 typealias)을 재수출하기 때문에, `import Foundation`과 `import YachtCore`를 함께 하는 소비자는 bare `Category`에서 `'Category' is ambiguous for type lookup` 오류를 받는다. SwiftUI가 Foundation을 재수출하므로 App 타깃의 거의 모든 파일이 여기 해당하고, `extension Category`는 아예 작성할 수 없다. (Task 7에서 발견, 스크래치 패키지로 실측 확인)
 - **`xcodebuild`의 `-derivedDataPath`는 반드시 저장소 밖(`/private/tmp` 아래)을 가리킨다.** 이 저장소는 iCloud Drive에 있어서 리포지토리 내부로 빌드하면 codesign이 `resource fork, Finder information, or similar detritus not allowed`로 실패한다 (Task 2 스파이크 실측).
 - **정지 자세를 축정렬로 스냅하지 않는다.** 바닥에 누운 주사위는 yaw가 연속적으로 자유롭다. 회전 오프셋 Δ는 `q_rest` 전체가 아니라 위를 향한 눈 `u`에만 의존한다 (스펙 §7.3).
 - 저장소 경로에 공백이 있다(`.../com~apple~CloudDocs/yacht_dice_proj`). 모든 셸 명령에서 경로를 따옴표로 감싼다.
@@ -574,21 +575,21 @@ MSG
 
 ---
 
-### Task 3: Category 점수 계산
+### Task 3: ScoreCategory 점수 계산
 
 스펙 §4.2 표를 순수 함수로 옮긴다. 이 프로젝트에서 가장 많이 읽힐 코드이므로 표와 1:1로 대응하게 쓴다.
 
 **Files:**
-- Create: `Packages/YachtCore/Sources/YachtCore/Category.swift`
+- Create: `Packages/YachtCore/Sources/YachtCore/ScoreCategory.swift`
 - Create: `Packages/YachtCore/Tests/YachtCoreTests/CategoryScoringTests.swift`
 
 **Interfaces:**
 - Consumes: Task 1의 `YachtCore` 모듈
 - Produces:
-  - `public enum Category: String, CaseIterable, Codable, Hashable, Sendable` — 12 케이스
-  - `public static let Category.upperCases: [Category]`
-  - `public var Category.isUpper: Bool`
-  - `public func Category.score(_ dice: [Int]) -> Int`
+  - `public enum ScoreCategory: String, CaseIterable, Codable, Hashable, Sendable` — 12 케이스
+  - `public static let ScoreCategory.upperCases: [ScoreCategory]`
+  - `public var ScoreCategory.isUpper: Bool`
+  - `public func ScoreCategory.score(_ dice: [Int]) -> Int`
 
 - [ ] **Step 1: 실패하는 테스트 작성**
 
@@ -602,21 +603,21 @@ import Testing
 struct CategoryScoringTests {
 
     @Test("상단 카테고리는 해당 눈의 합이다", arguments: [
-        (Category.aces,   [1, 1, 3, 4, 1], 3),
-        (Category.deuces, [2, 2, 2, 4, 5], 6),
-        (Category.threes, [1, 2, 4, 5, 6], 0),
-        (Category.fours,  [4, 4, 4, 4, 4], 20),
-        (Category.fives,  [5, 5, 1, 2, 3], 10),
-        (Category.sixes,  [6, 6, 6, 1, 1], 18),
+        (ScoreCategory.aces,   [1, 1, 3, 4, 1], 3),
+        (ScoreCategory.deuces, [2, 2, 2, 4, 5], 6),
+        (ScoreCategory.threes, [1, 2, 4, 5, 6], 0),
+        (ScoreCategory.fours,  [4, 4, 4, 4, 4], 20),
+        (ScoreCategory.fives,  [5, 5, 1, 2, 3], 10),
+        (ScoreCategory.sixes,  [6, 6, 6, 1, 1], 18),
     ])
-    func 상단(category: Category, dice: [Int], expected: Int) {
+    func 상단(category: ScoreCategory, dice: [Int], expected: Int) {
         #expect(category.score(dice) == expected)
     }
 
     @Test("Choice는 항상 5개 총합이다")
     func choice() {
-        #expect(Category.choice.score([1, 2, 3, 4, 5]) == 15)
-        #expect(Category.choice.score([6, 6, 6, 6, 6]) == 30)
+        #expect(ScoreCategory.choice.score([1, 2, 3, 4, 5]) == 15)
+        #expect(ScoreCategory.choice.score([6, 6, 6, 6, 6]) == 30)
     }
 
     @Test("4 of a Kind는 같은 눈 4개 이상일 때 5개 총합이다", arguments: [
@@ -626,7 +627,7 @@ struct CategoryScoringTests {
         ([1, 2, 3, 4, 5], 0),
     ])
     func 포카인드(dice: [Int], expected: Int) {
-        #expect(Category.fourOfAKind.score(dice) == expected)
+        #expect(ScoreCategory.fourOfAKind.score(dice) == expected)
     }
 
     @Test("Full House는 3+2일 때 5개 총합이고 5개 동일도 인정한다", arguments: [
@@ -637,7 +638,7 @@ struct CategoryScoringTests {
         ([1, 2, 3, 4, 5], 0),
     ])
     func 풀하우스(dice: [Int], expected: Int) {
-        #expect(Category.fullHouse.score(dice) == expected)
+        #expect(ScoreCategory.fullHouse.score(dice) == expected)
     }
 
     @Test("S. Straight는 연속 4개면 15점 고정이다", arguments: [
@@ -649,7 +650,7 @@ struct CategoryScoringTests {
         ([1, 1, 2, 3, 4], 15),   // 중복이 있어도 연속 4개가 있으면 인정
     ])
     func 스몰스트레이트(dice: [Int], expected: Int) {
-        #expect(Category.smallStraight.score(dice) == expected)
+        #expect(ScoreCategory.smallStraight.score(dice) == expected)
     }
 
     @Test("L. Straight는 연속 5개면 30점 고정이다", arguments: [
@@ -659,20 +660,20 @@ struct CategoryScoringTests {
         ([1, 1, 2, 3, 4], 0),
     ])
     func 라지스트레이트(dice: [Int], expected: Int) {
-        #expect(Category.largeStraight.score(dice) == expected)
+        #expect(ScoreCategory.largeStraight.score(dice) == expected)
     }
 
     @Test("Yacht는 5개 동일이면 50점 고정이다")
     func 야추() {
-        #expect(Category.yacht.score([4, 4, 4, 4, 4]) == 50)
-        #expect(Category.yacht.score([4, 4, 4, 4, 1]) == 0)
+        #expect(ScoreCategory.yacht.score([4, 4, 4, 4, 4]) == 50)
+        #expect(ScoreCategory.yacht.score([4, 4, 4, 4, 1]) == 0)
     }
 
     @Test("상단 6개만 isUpper다")
     func 상단_구분() {
-        #expect(Category.upperCases.count == 6)
-        #expect(Category.allCases.count == 12)
-        #expect(Category.allCases.filter(\.isUpper) == Category.upperCases)
+        #expect(ScoreCategory.upperCases.count == 6)
+        #expect(ScoreCategory.allCases.count == 12)
+        #expect(ScoreCategory.allCases.filter(\.isUpper) == ScoreCategory.upperCases)
     }
 }
 ```
@@ -682,24 +683,24 @@ struct CategoryScoringTests {
 ```bash
 swift test --package-path "Packages/YachtCore"
 ```
-Expected: 컴파일 실패 — `cannot find 'Category' in scope`
+Expected: 컴파일 실패 — `cannot find 'ScoreCategory' in scope`
 
 - [ ] **Step 3: 구현 작성**
 
-`Packages/YachtCore/Sources/YachtCore/Category.swift`:
+`Packages/YachtCore/Sources/YachtCore/ScoreCategory.swift`:
 
 ```swift
 import Foundation
 
 /// 야추 12 카테고리. 점수 규칙은 스펙 §4.2 표가 유일한 근거다.
-public enum Category: String, CaseIterable, Codable, Hashable, Sendable {
+public enum ScoreCategory: String, CaseIterable, Codable, Hashable, Sendable {
     case aces, deuces, threes, fours, fives, sixes
     case choice, fourOfAKind, fullHouse, smallStraight, largeStraight, yacht
 
     /// 상단 소계와 63점 보너스에 들어가는 6개.
-    public static let upperCases: [Category] = [.aces, .deuces, .threes, .fours, .fives, .sixes]
+    public static let upperCases: [ScoreCategory] = [.aces, .deuces, .threes, .fours, .fives, .sixes]
 
-    public var isUpper: Bool { Category.upperCases.contains(self) }
+    public var isUpper: Bool { ScoreCategory.upperCases.contains(self) }
 
     /// 이 카테고리에 이 주사위를 기록했을 때의 점수. 조건을 못 채우면 0이다.
     public func score(_ dice: [Int]) -> Int {
@@ -779,11 +780,11 @@ MSG
 - Create: `Packages/YachtCore/Tests/YachtCoreTests/ScoreCardTests.swift`
 
 **Interfaces:**
-- Consumes: Task 3의 `Category`
+- Consumes: Task 3의 `ScoreCategory`
 - Produces:
   - `public struct ScoreCard: Equatable, Codable, Sendable`
-  - `init()`, `func isFilled(_ c: Category) -> Bool`, `mutating func record(_ c: Category, _ points: Int)`
-  - `var entry(_ c: Category) -> Int?`, `var upperSubtotal: Int`, `var upperBonus: Int`, `var total: Int`, `var isComplete: Bool`
+  - `init()`, `func isFilled(_ c: ScoreCategory) -> Bool`, `mutating func record(_ c: ScoreCategory, _ points: Int)`
+  - `var entry(_ c: ScoreCategory) -> Int?`, `var upperSubtotal: Int`, `var upperBonus: Int`, `var total: Int`, `var isComplete: Bool`
   - `static let upperBonusThreshold = 63`, `static let upperBonusPoints = 35`
 
 - [ ] **Step 1: 실패하는 테스트 작성**
@@ -820,7 +821,7 @@ struct ScoreCardTests {
     @Test("상단 소계가 63 미만이면 보너스가 없다")
     func 보너스_미달() {
         var card = ScoreCard()
-        for c in Category.upperCases { card.record(c, 10) }   // 60
+        for c in ScoreCategory.upperCases { card.record(c, 10) }   // 60
         #expect(card.upperSubtotal == 60)
         #expect(card.upperBonus == 0)
         #expect(card.total == 60)
@@ -829,7 +830,7 @@ struct ScoreCardTests {
     @Test("상단 소계가 정확히 63이면 보너스 35가 붙는다")
     func 보너스_경계() {
         var card = ScoreCard()
-        for (i, c) in Category.upperCases.enumerated() { card.record(c, i == 0 ? 13 : 10) }   // 63
+        for (i, c) in ScoreCategory.upperCases.enumerated() { card.record(c, i == 0 ? 13 : 10) }   // 63
         #expect(card.upperSubtotal == 63)
         #expect(card.upperBonus == 35)
         #expect(card.total == 63 + 35)
@@ -847,7 +848,7 @@ struct ScoreCardTests {
     @Test("12칸을 모두 채우면 완성이다")
     func 완성() {
         var card = ScoreCard()
-        for c in Category.allCases { card.record(c, 0) }
+        for c in ScoreCategory.allCases { card.record(c, 0) }
         #expect(card.isComplete == true)
     }
 
@@ -882,21 +883,21 @@ public struct ScoreCard: Equatable, Codable, Sendable {
     public static let upperBonusThreshold = 63
     public static let upperBonusPoints = 35
 
-    private var entries: [Category: Int]
+    private var entries: [ScoreCategory: Int]
 
     public init() { entries = [:] }
 
-    public func entry(_ category: Category) -> Int? { entries[category] }
-    public func isFilled(_ category: Category) -> Bool { entries[category] != nil }
+    public func entry(_ category: ScoreCategory) -> Int? { entries[category] }
+    public func isFilled(_ category: ScoreCategory) -> Bool { entries[category] != nil }
 
     /// 0점(scratch)도 기록으로 센다. 같은 칸을 두 번 기록하는 것은 호출자의 버그다.
-    public mutating func record(_ category: Category, _ points: Int) {
+    public mutating func record(_ category: ScoreCategory, _ points: Int) {
         precondition(entries[category] == nil, "이미 기록된 카테고리다: \(category)")
         entries[category] = points
     }
 
     public var upperSubtotal: Int {
-        Category.upperCases.reduce(0) { $0 + (entries[$1] ?? 0) }
+        ScoreCategory.upperCases.reduce(0) { $0 + (entries[$1] ?? 0) }
     }
 
     /// 소계가 63에 도달하는 즉시 확정된다. 12턴 종료를 기다리지 않는다.
@@ -906,9 +907,9 @@ public struct ScoreCard: Equatable, Codable, Sendable {
 
     public var total: Int { entries.values.reduce(0, +) + upperBonus }
 
-    public var isComplete: Bool { entries.count == Category.allCases.count }
+    public var isComplete: Bool { entries.count == ScoreCategory.allCases.count }
 
-    public var openCategories: [Category] { Category.allCases.filter { entries[$0] == nil } }
+    public var openCategories: [ScoreCategory] { ScoreCategory.allCases.filter { entries[$0] == nil } }
 }
 ```
 
@@ -949,10 +950,10 @@ P3 온라인 대전이 `Event` 배열 교환만으로 성립하게 하는 핵심
 - Create: `Packages/YachtCore/Tests/YachtCoreTests/GameStateTests.swift`
 
 **Interfaces:**
-- Consumes: Task 3의 `Category`, Task 4의 `ScoreCard`
+- Consumes: Task 3의 `ScoreCategory`, Task 4의 `ScoreCard`
 - Produces:
   - `public enum Phase: String, Codable, Sendable { case awaitingFirstRoll, rolling, finished }`
-  - `public enum Event: Equatable, Codable, Sendable` — `.rolled([Int])`, `.holdToggled(Int)`, `.committed(Category, Int)`, `.turnAdvanced`, `.gameEnded`
+  - `public enum Event: Equatable, Codable, Sendable` — `.rolled([Int])`, `.holdToggled(Int)`, `.committed(ScoreCategory, Int)`, `.turnAdvanced`, `.gameEnded`
   - `public struct GameState: Equatable, Codable, Sendable`
   - `init(playerCount: Int = 1)`
   - `var dice: [Int]`, `var held: Set<Int>`, `var rollsUsed: Int`, `var rollsRemaining: Int`, `var rollableIndices: [Int]`
@@ -1056,7 +1057,7 @@ struct GameStateTests {
     func 전부_기록됨() {
         var s = GameState(playerCount: 1)
         #expect(s.isAllScored == false)
-        for c in Category.allCases {
+        for c in ScoreCategory.allCases {
             s = s.applying(.rolled([1, 1, 1, 1, 1])).applying(.committed(c, 0)).applying(.turnAdvanced)
         }
         #expect(s.isAllScored == true)
@@ -1107,7 +1108,7 @@ public enum Event: Equatable, Codable, Sendable {
     /// 배열 길이는 항상 rollableIndices.count 와 같아야 한다.
     case rolled([Int])
     case holdToggled(Int)
-    case committed(Category, Int)
+    case committed(ScoreCategory, Int)
     case turnAdvanced
     case gameEnded
 }
@@ -1233,8 +1234,8 @@ UI가 버튼을 언제 비활성화할지 판단하는 근거다. 부작용이 �
 **Interfaces:**
 - Consumes: Task 5의 `GameState`, `Phase`
 - Produces:
-  - `public enum Intent: Equatable, Sendable` — `.roll`, `.toggleHold(Int)`, `.commit(Category)`
-  - `public enum RuleError: Error, Equatable, Sendable` — `.gameFinished`, `.noRollsRemaining`, `.allDiceHeld`, `.mustRollFirst`, `.categoryAlreadyUsed(Category)`, `.indexOutOfRange(Int)`
+  - `public enum Intent: Equatable, Sendable` — `.roll`, `.toggleHold(Int)`, `.commit(ScoreCategory)`
+  - `public enum RuleError: Error, Equatable, Sendable` — `.gameFinished`, `.noRollsRemaining`, `.allDiceHeld`, `.mustRollFirst`, `.categoryAlreadyUsed(ScoreCategory)`, `.indexOutOfRange(Int)`
   - `public func GameState.validate(_ intent: Intent) -> Result<Void, RuleError>`
   - `public func GameState.allows(_ intent: Intent) -> Bool`
 
@@ -1330,7 +1331,7 @@ import Foundation
 public enum Intent: Equatable, Sendable {
     case roll
     case toggleHold(Int)
-    case commit(Category)
+    case commit(ScoreCategory)
 }
 
 public enum RuleError: Error, Equatable, Sendable {
@@ -1338,7 +1339,7 @@ public enum RuleError: Error, Equatable, Sendable {
     case noRollsRemaining
     case allDiceHeld
     case mustRollFirst
-    case categoryAlreadyUsed(Category)
+    case categoryAlreadyUsed(ScoreCategory)
     case indexOutOfRange(Int)
 }
 ```
@@ -1421,7 +1422,7 @@ MSG
 - Modify: `Packages/YachtCore/Sources/YachtCore/Intent.swift` (테스트 전용 `==` 연산자 제거)
 
 **Interfaces:**
-- Consumes: Task 3의 `Category.score`, Task 4의 `ScoreCard`, Task 5의 `GameState`
+- Consumes: Task 3의 `ScoreCategory.score`, Task 4의 `ScoreCard`, Task 5의 `GameState`
 - Produces: 없음 (테스트 전용)
 
 - [ ] **Step 1: 테스트 전용 `==` 연산자를 프로덕션 타깃에서 테스트 타깃으로 옮긴다**
@@ -1487,7 +1488,7 @@ private let allRolls: [[Int]] = {
 /// 프로덕션 구현과 **알고리즘이 다른** 순진한 채점기.
 /// 프로덕션이 counts 배열과 Set을 쓰는 데 비해 이쪽은 정렬과 문자열 매칭을 쓴다.
 /// 두 구현이 우연히 같은 실수를 하기 어렵게 만드는 것이 목적이다.
-private func naiveScore(_ category: Category, _ dice: [Int]) -> Int {
+private func naiveScore(_ category: ScoreCategory, _ dice: [Int]) -> Int {
     let sorted = dice.sorted()
     let total = sorted.reduce(0, +)
 
@@ -1535,7 +1536,7 @@ struct ExhaustiveScoringTests {
         var mismatches: [String] = []
         var checked = 0
         for dice in allRolls {
-            for category in Category.allCases {
+            for category in ScoreCategory.allCases {
                 checked += 1
                 let mine = category.score(dice)
                 let theirs = naiveScore(category, dice)
@@ -1554,32 +1555,32 @@ struct ExhaustiveScoringTests {
             let total = dice.reduce(0, +)
 
             // Choice는 언제나 총합이다
-            #expect(Category.choice.score(dice) == total)
+            #expect(ScoreCategory.choice.score(dice) == total)
 
             // 라지 스트레이트가 성립하면 스몰도 성립한다
-            if Category.largeStraight.score(dice) == 30 {
-                #expect(Category.smallStraight.score(dice) == 15, "라지인데 스몰이 아니다: \(dice)")
+            if ScoreCategory.largeStraight.score(dice) == 30 {
+                #expect(ScoreCategory.smallStraight.score(dice) == 15, "라지인데 스몰이 아니다: \(dice)")
             }
 
             // 야추가 성립하면 4 of a Kind와 Full House도 성립한다
-            if Category.yacht.score(dice) == 50 {
-                #expect(Category.fourOfAKind.score(dice) == total, "야추인데 포카인드가 아니다: \(dice)")
-                #expect(Category.fullHouse.score(dice) == total, "야추인데 풀하우스가 아니다: \(dice)")
+            if ScoreCategory.yacht.score(dice) == 50 {
+                #expect(ScoreCategory.fourOfAKind.score(dice) == total, "야추인데 포카인드가 아니다: \(dice)")
+                #expect(ScoreCategory.fullHouse.score(dice) == total, "야추인데 풀하우스가 아니다: \(dice)")
             }
 
             // 총합형 카테고리는 0이거나 정확히 총합이다 — 부분합이 나오면 안 된다
-            for category in [Category.fourOfAKind, .fullHouse] {
+            for category in [ScoreCategory.fourOfAKind, .fullHouse] {
                 let s = category.score(dice)
                 #expect(s == 0 || s == total, "\(category)가 부분합 \(s)를 냈다: \(dice)")
             }
 
             // 고정 점수형은 0이거나 정해진 값이다
-            #expect([0, 15].contains(Category.smallStraight.score(dice)))
-            #expect([0, 30].contains(Category.largeStraight.score(dice)))
-            #expect([0, 50].contains(Category.yacht.score(dice)))
+            #expect([0, 15].contains(ScoreCategory.smallStraight.score(dice)))
+            #expect([0, 30].contains(ScoreCategory.largeStraight.score(dice)))
+            #expect([0, 50].contains(ScoreCategory.yacht.score(dice)))
 
             // 상단은 해당 눈 개수 x 눈값이므로 5 x 눈값을 넘을 수 없다
-            for (index, category) in Category.upperCases.enumerated() {
+            for (index, category) in ScoreCategory.upperCases.enumerated() {
                 let face = index + 1
                 let s = category.score(dice)
                 #expect(s % face == 0 && s <= 5 * face, "\(category)가 \(s)를 냈다: \(dice)")
@@ -1596,7 +1597,7 @@ struct ExhaustiveScoringTests {
         var sum = 0
         var weighted = 0
         for (rollIndex, dice) in allRolls.enumerated() {
-            for (categoryIndex, category) in Category.allCases.enumerated() {
+            for (categoryIndex, category) in ScoreCategory.allCases.enumerated() {
                 let s = category.score(dice)
                 sum += s
                 weighted += s * (rollIndex % 97 + 1) * (categoryIndex + 1)
@@ -1699,7 +1700,7 @@ struct GameInvariantTests {
     func 총점_일관성(seed: Int) {
         let (state, _) = playRandomGame(seed: UInt64(seed), playerCount: 2)
         for card in state.scorecards {
-            let itemSum = Category.allCases.reduce(0) { $0 + (card.entry($1) ?? 0) }
+            let itemSum = ScoreCategory.allCases.reduce(0) { $0 + (card.entry($1) ?? 0) }
             let expectedBonus = card.upperSubtotal >= ScoreCard.upperBonusThreshold ? 35 : 0
             #expect(card.upperBonus == expectedBonus)
             #expect(card.total == itemSum + expectedBonus)
@@ -1854,7 +1855,7 @@ struct MatchLogTests {
     func 완결_판별() {
         var log = MatchLog(playerCount: 1)
         #expect(log.isFinished == false)
-        for c in Category.allCases {
+        for c in ScoreCategory.allCases {
             log.append(.rolled([1, 1, 1, 1, 1]))
             log.append(.committed(c, 0))
             log.append(.turnAdvanced)
@@ -4138,7 +4139,7 @@ MSG
   - `init(driver: any MatchDriver, stage: DiceStage, log: MatchLog)`
   - `var visibleState: GameState`, `var isBusy: Bool`, `var assistEnabled: Bool`
   - `func send(_ intent: Intent) async`
-  - `func previewScore(_ category: Category) -> Int?`
+  - `func previewScore(_ category: ScoreCategory) -> Int?`
   - `var onLogChanged: (@Sendable (MatchLog) -> Void)?`
 
 - [ ] **Step 1: 실패하는 테스트 작성**
@@ -4367,7 +4368,7 @@ final class GameSession {
     }
 
     /// Assist가 켜져 있고 아직 비어 있는 칸에 대해서만 예상 점수를 준다.
-    func previewScore(_ category: Category) -> Int? {
+    func previewScore(_ category: ScoreCategory) -> Int? {
         guard assistEnabled,
               visibleState.phase == .rolling,
               !visibleState.scorecards[visibleState.currentPlayer].isFilled(category)
@@ -4452,9 +4453,9 @@ MSG
 - Create: `Tests/YachtDiceTests/CategoryDisplayTests.swift`
 
 **Interfaces:**
-- Consumes: Task 15의 `GameSession`, `YachtCore.Category`
+- Consumes: Task 15의 `GameSession`, `YachtCore.ScoreCategory`
 - Produces:
-  - `extension Category { var displayName: String; var accessibilityDescription: String }`
+  - `extension ScoreCategory { var displayName: String; var accessibilityDescription: String }`
   - `struct ScoreboardView: View` — `init(session: GameSession)`
   - 접근성 식별자: `"scoreboard.row.<category.rawValue>"`, `"scoreboard.total"`
 
@@ -4472,7 +4473,7 @@ struct CategoryDisplayTests {
 
     @Test("모든 카테고리에 표시 이름이 있다")
     func 이름_존재() {
-        for category in Category.allCases {
+        for category in ScoreCategory.allCases {
             #expect(!category.displayName.isEmpty, "\(category)의 표시 이름이 비어 있다")
             #expect(!category.accessibilityDescription.isEmpty, "\(category)의 음성 설명이 비어 있다")
         }
@@ -4480,15 +4481,15 @@ struct CategoryDisplayTests {
 
     @Test("표시 이름이 서로 겹치지 않는다")
     func 이름_유일성() {
-        let names = Category.allCases.map(\.displayName)
+        let names = ScoreCategory.allCases.map(\.displayName)
         #expect(Set(names).count == names.count, "중복된 표시 이름이 있다")
     }
 
     @Test("음성 설명이 조건을 알려준다")
     func 음성_설명() {
-        #expect(Category.yacht.accessibilityDescription.contains("5"))
-        #expect(Category.fullHouse.accessibilityDescription.contains("3"))
-        #expect(Category.smallStraight.accessibilityDescription.contains("4"))
+        #expect(ScoreCategory.yacht.accessibilityDescription.contains("5"))
+        #expect(ScoreCategory.fullHouse.accessibilityDescription.contains("3"))
+        #expect(ScoreCategory.smallStraight.accessibilityDescription.contains("4"))
     }
 }
 ```
@@ -4500,7 +4501,7 @@ xcodebuild test -project YachtDice.xcodeproj -scheme YachtDice \
   -destination 'platform=iOS Simulator,name=iPhone 17' \
   -only-testing:YachtDiceTests/CategoryDisplayTests 2>&1 | tail -20
 ```
-Expected: 컴파일 실패 — `value of type 'Category' has no member 'displayName'`
+Expected: 컴파일 실패 — `value of type 'ScoreCategory' has no member 'displayName'`
 
 - [ ] **Step 3: `CategoryDisplay.swift` 작성**
 
@@ -4508,7 +4509,7 @@ Expected: 컴파일 실패 — `value of type 'Category' has no member 'displayN
 import Foundation
 import YachtCore
 
-extension Category {
+extension ScoreCategory {
     /// 점수판에 보이는 이름. 레퍼런스 표기를 따른다.
     var displayName: String {
         switch self {
@@ -4561,7 +4562,7 @@ struct ScoreboardView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ForEach(Category.upperCases, id: \.self) { row($0) }
+            ForEach(ScoreCategory.upperCases, id: \.self) { row($0) }
             subtotalRow
             Divider()
             ForEach(lowerCategories, id: \.self) { row($0) }
@@ -4572,11 +4573,11 @@ struct ScoreboardView: View {
         .padding(.horizontal, 12)
     }
 
-    private var lowerCategories: [Category] {
-        Category.allCases.filter { !$0.isUpper }
+    private var lowerCategories: [ScoreCategory] {
+        ScoreCategory.allCases.filter { !$0.isUpper }
     }
 
-    private func row(_ category: Category) -> some View {
+    private func row(_ category: ScoreCategory) -> some View {
         let recorded = card.entry(category)
         let preview = session.previewScore(category)
 
@@ -4609,7 +4610,7 @@ struct ScoreboardView: View {
         .accessibilityHint(recorded == nil ? category.accessibilityDescription : "")
     }
 
-    private func accessibilityLabel(for category: Category, recorded: Int?, preview: Int?) -> String {
+    private func accessibilityLabel(for category: ScoreCategory, recorded: Int?, preview: Int?) -> String {
         if let recorded { return "\(category.displayName), \(recorded)점 기록됨" }
         if let preview { return "\(category.displayName), 지금 기록하면 \(preview)점" }
         return "\(category.displayName), 비어 있음"
@@ -5055,7 +5056,7 @@ struct MatchStoreTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         var log = MatchLog(playerCount: 1)
-        for category in Category.allCases {
+        for category in ScoreCategory.allCases {
             log.append(.rolled([1, 1, 1, 1, 1]))
             log.append(.committed(category, 0))
             log.append(.turnAdvanced)
@@ -5224,7 +5225,7 @@ struct AccessibilityAuditTests {
 
     @Test("모든 카테고리 행에 고유한 접근성 식별자가 있다")
     func 식별자_유일성() {
-        let identifiers = Category.allCases.map { "scoreboard.row.\($0.rawValue)" }
+        let identifiers = ScoreCategory.allCases.map { "scoreboard.row.\($0.rawValue)" }
         #expect(Set(identifiers).count == identifiers.count)
     }
 
@@ -5242,7 +5243,7 @@ struct AccessibilityAuditTests {
     func 큰_글씨() {
         // 가장 긴 이름 + 3자리 점수가 표준 폭에서 잘리지 않아야 한다.
         // 실제 렌더 검증은 Step 3의 수동 확인으로 하고, 여기서는 길이 상한만 고정한다.
-        for category in Category.allCases {
+        for category in ScoreCategory.allCases {
             #expect(category.displayName.count <= 12,
                     "\(category.displayName)이 길어서 큰 글씨에서 잘린다")
         }
@@ -5252,7 +5253,7 @@ struct AccessibilityAuditTests {
     func 점수_자릿수() {
         // 야추 최고 총점: 상단 105 + 보너스 35 + Choice 30 + 4K 30 + FH 30 + 15 + 30 + 50 = 325
         var card = ScoreCard()
-        for (index, category) in Category.upperCases.enumerated() { card.record(category, (index + 1) * 5) }
+        for (index, category) in ScoreCategory.upperCases.enumerated() { card.record(category, (index + 1) * 5) }
         card.record(.choice, 30)
         card.record(.fourOfAKind, 30)
         card.record(.fullHouse, 30)
