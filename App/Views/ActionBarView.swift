@@ -9,10 +9,18 @@ struct ActionBarView: View {
     var body: some View {
         VStack(spacing: 10) {
             diceRow
-            HStack(spacing: 16) {
-                assistToggle
-                Spacer()
-                rollButton
+            // 큰 글씨(AX5)에서는 Assist와 Roll이 한 줄에 다 안 들어가고 Roll의
+            // 텍스트가 뭉개진다. 안 들어가면 세로로 쌓는다.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 16) {
+                    assistToggle
+                    Spacer()
+                    rollButton
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    assistToggle
+                    rollButton
+                }
             }
         }
         .padding(.horizontal, 16)

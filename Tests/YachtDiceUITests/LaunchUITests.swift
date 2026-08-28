@@ -1,6 +1,7 @@
 import XCTest
 
 final class LaunchUITests: XCTestCase {
+    @MainActor
     func test_앱이_실행된다() {
         let app = XCUIApplication()
         app.launch()
