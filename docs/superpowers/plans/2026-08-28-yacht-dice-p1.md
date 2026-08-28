@@ -203,10 +203,15 @@ struct BakerApp: App {
 
 ```swift
 import Testing
+import YachtCore
+import DiceTrajectory
 @testable import YachtDice
 
-@Test func 앱_모듈이_링크된다() {
-    #expect(Bool(true))
+/// 앱 타깃이 두 로컬 패키지에 실제로 링크되었는지 확인한다.
+/// Bool(true)를 확인하는 테스트는 스캐폴딩이 깨져도 통과하므로 의미가 없다.
+@Test func 앱_타깃이_두_패키지에_링크된다() {
+    #expect(YachtCore.diceCount == 5)
+    #expect(DiceTrajectory.formatVersion == 1)
 }
 ```
 
@@ -1541,15 +1546,8 @@ struct ExhaustiveScoringTests {
     func 골든_체크섬() {
         // 규칙을 바꾸면 이 값이 바뀐다. 의도한 변경이면 새 값으로 갱신하고,
         // 의도하지 않았다면 방금 무언가를 깨뜨린 것이다.
-        var hasher = Hasher()
-        for dice in allRolls {
-            for category in Category.allCases {
-                hasher.combine(category.rawValue)
-                hasher.combine(dice)
-                hasher.combine(category.score(dice))
-            }
-        }
-        // Hasher는 실행마다 시드가 달라지므로 결정적 합계를 따로 만든다.
+        // Swift의 Hasher는 실행마다 시드가 달라져 골든값으로 쓸 수 없으므로
+        // 결정적인 두 가지 합계를 직접 만든다.
         var sum = 0
         var weighted = 0
         for (rollIndex, dice) in allRolls.enumerated() {
@@ -1562,7 +1560,6 @@ struct ExhaustiveScoringTests {
         // 최초 실행에서 나온 값을 여기에 박아 넣는다 (Step 3 참고).
         #expect(sum == 0, "GOLDEN_SUM 자리표시자 — Step 3에서 실제 값으로 교체한다")
         #expect(weighted == 0, "GOLDEN_WEIGHTED 자리표시자 — Step 3에서 실제 값으로 교체한다")
-        _ = hasher
     }
 }
 ```
@@ -3341,19 +3338,29 @@ final class TrajectoryLibrary: Sendable {
 }
 ```
 
-- [ ] **Step 4: `project.yml`에 리소스 등록 후 재생성**
+- [ ] **Step 4: `project.yml`의 리소스 경로 확인 후 재생성**
 
-`targets.YachtDice`에 다음을 추가:
-
-```yaml
-    sources:
-      - App
-      - path: App/Resources/trajectories.bin
-        buildPhase: resources
-```
+Task 1의 `project.yml`은 `targets.YachtDice.sources: [App]`이므로 `App/Resources/`가 이미 통째로 포함되고, XcodeGen은 `.bin`을 자동으로 리소스 빌드 페이즈에 넣는다. **`sources:` 키를 새로 추가하면 YAML 키가 중복되어 파싱이 깨진다.** 따라서 기본적으로 `project.yml`은 손대지 않는다.
 
 ```bash
 xcodegen generate
+xcodebuild build -project YachtDice.xcodeproj -scheme YachtDice \
+  -destination 'platform=iOS Simulator,name=iPhone 17' | tail -3
+```
+
+빌드 후 번들에 파일이 들어갔는지 확인한다:
+
+```bash
+find ~/Library/Developer/Xcode/DerivedData -name "trajectories.bin" -path "*YachtDice.app*" | head -1
+```
+
+경로가 나오지 않으면 그때만 `targets.YachtDice`의 **기존** `sources: [App]` 줄을 아래로 **교체**한다 (새 키를 추가하는 것이 아니다):
+
+```yaml
+    sources:
+      - path: App
+      - path: App/Resources/trajectories.bin
+        buildPhase: resources
 ```
 
 - [ ] **Step 5: `DiceSceneBuilder.swift` 작성**
@@ -3518,6 +3525,8 @@ enum DiceSceneBuilder {
 `DiceSceneBuilder.swift` 맨 위에 `import CoreGraphics`를 추가한다.
 
 **IBL이 붙었는지 확인하는 법**: 시뮬레이터에서 주사위 흰 면에 위아래 밝기 차이가 보이면 성공이다. 전체가 균일한 흰색이면 `EnvironmentResource.generate`가 실패한 것이니 `makeImageBasedLight()`가 nil을 돌려주는지 로그로 확인한다.
+
+**API 이름이 SDK 버전에 따라 다를 수 있다.** `EnvironmentResource.generate(fromEquirectangular:)`와 `TextureResource(image:options:)`가 컴파일되지 않으면, Xcode에서 `EnvironmentResource.` / `TextureResource.` 를 입력해 자동완성으로 실제 시그니처를 확인하고 맞춘다. **둘 다 실패하면 IBL과 눈 텍스처를 빼고 진행한다** — 단색 주사위로도 P1 완료 기준 6개는 전부 충족되며, 재질 마감은 P4의 작업이다. 뺐다면 그 사실을 커밋 메시지에 남긴다.
 
 **주사위 눈**: P1에서는 단색 흰 주사위로 진행한다. 눈 텍스처는 Step 6에서 붙인다.
 
