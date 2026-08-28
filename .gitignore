@@ -8,3 +8,8 @@ xcuserdata/
 .build/
 
 .build-baker/
+
+# iCloud Drive가 동기화 충돌 시 만드는 사본. 이 저장소는 iCloud 안에 있다.
+# "Info 2.plist" 같은 이름으로 생기며, git add -A 에 딸려 들어가기 쉽다.
+* [0-9].*
+.*.icloud
