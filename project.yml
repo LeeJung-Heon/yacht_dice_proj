@@ -1,0 +1,72 @@
+name: YachtDice
+options:
+  bundleIdPrefix: com.leejungheon.yachtdice
+  deploymentTarget:
+    iOS: "18.0"
+    macOS: "15.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_UPCOMING_FEATURE_EXISTENTIAL_ANY: YES
+
+packages:
+  YachtCore:
+    path: Packages/YachtCore
+  DiceTrajectory:
+    path: Packages/DiceTrajectory
+
+targets:
+  YachtDice:
+    type: application
+    platform: iOS
+    sources: [App]
+    info:
+      path: App/Info.plist
+    dependencies:
+      - package: YachtCore
+      - package: DiceTrajectory
+
+  YachtDiceTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests/YachtDiceTests]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: YachtDice
+
+  YachtDiceUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Tests/YachtDiceUITests]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: YachtDice
+
+  TrajectoryBaker:
+    type: application
+    platform: macOS
+    sources: [Tools/TrajectoryBaker]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - package: DiceTrajectory
+
+schemes:
+  YachtDice:
+    build:
+      targets:
+        YachtDice: all
+    test:
+      targets: [YachtDiceTests, YachtDiceUITests]
+  TrajectoryBaker:
+    build:
+      targets:
+        TrajectoryBaker: all
