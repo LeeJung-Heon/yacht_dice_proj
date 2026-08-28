@@ -36,7 +36,13 @@ final class GameSession {
     }
 
     func send(_ intent: Intent) async {
-        guard !isBusy, visibleState.allows(intent) else { return }
+        guard !isBusy, visibleState.allows(intent) else {
+            // 굴리지 못하고 되돌아가면 이번 스와이프의 방향은 버린다.
+            // 제스처는 조건 없이 방향을 설정하는데, 여기서 소비하지 않고 반려하면
+            // 연출 중에 왼쪽으로 쓸어넘긴 방향이 "다음" 굴림에 뒤늦게 적용된다.
+            if case .roll = intent { nextThrowDirection = nil }
+            return
+        }
         isBusy = true
         defer { isBusy = false }
 

@@ -121,6 +121,31 @@ struct GameSessionTests {
         #expect(session.visibleState == before, "진행 중인 판이 초기화됐다")
     }
 
+    @Test("굴릴 수 없어 반려된 스와이프의 방향은 남지 않는다")
+    func 방향_누수_반려() async throws {
+        let session = try makeSession(script: [[1, 2, 3, 4, 5]])
+        for _ in 0..<3 { await session.send(.roll) }
+        #expect(session.visibleState.rollsRemaining == 0)
+
+        session.nextThrowDirection = .left      // 제스처가 조건 없이 설정한다
+        await session.send(.roll)               // 더 굴릴 수 없어 반려된다
+        #expect(session.nextThrowDirection == nil,
+                "굴리지 못한 방향이 남아 다음 굴림으로 샌다")
+    }
+
+    @Test("연출 중에 쓸어넘긴 방향이 다음 굴림으로 새지 않는다")
+    func 방향_누수_연출중() async throws {
+        let session = try makeSession(script: [[1, 1, 1, 1, 1]], animated: true)
+        let rolling = Task { await session.send(.roll) }
+        while !session.isBusy { await Task.yield() }
+
+        session.nextThrowDirection = .left
+        await session.send(.roll)               // isBusy라 반려된다
+        #expect(session.nextThrowDirection == nil,
+                "연출 중 스와이프한 방향이 그대로 남아 다음 굴림에 적용된다")
+        await rolling.value
+    }
+
     @Test("Assist가 켜져 있으면 예상 점수를 준다")
     func 예상_점수() async throws {
         let session = try makeSession(script: [[5, 5, 5, 5, 5]])
