@@ -21,6 +21,9 @@ final class GameSession {
     private(set) var isBusy = false
     var assistEnabled = true
     var reduceMotion = false
+    /// 다음 굴림에 쓸 던지는 방향. 제스처가 설정하고 performRoll이 소비한다.
+    /// nil이면 무작위로 고른다 (버튼으로 굴린 경우).
+    var nextThrowDirection: ThrowDirection?
 
     var onLogChanged: (@Sendable (MatchLog) -> Void)?
     var onCollisionCues: (@MainActor ([CollisionCue]) -> Void)?
@@ -71,7 +74,8 @@ final class GameSession {
         // 상태는 즉시 전이시키되 화면에는 아직 노출하지 않는다
         let pending = visibleState.applying(.rolled(values))
 
-        let direction: ThrowDirection = ThrowDirection.allCases.randomElement() ?? .center
+        let direction = nextThrowDirection ?? ThrowDirection.allCases.randomElement() ?? .center
+        nextThrowDirection = nil
         let cues = await stage.roll(values: values, slots: slots,
                                     direction: direction, skipAnimation: reduceMotion)
         onCollisionCues?(cues)
