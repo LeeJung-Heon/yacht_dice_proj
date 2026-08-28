@@ -13,7 +13,16 @@ enum DiceSceneBuilder {
         root.addChild(makeTable())
         root.addChild(makeTray())
         for die in makeDice() { root.addChild(die) }
-        root.addChild(makeLighting())
+
+        let lighting = makeLighting()
+        root.addChild(lighting)
+        // IBL은 광원 엔티티(ibl)에 붙이고, 수신은 비출 대상(table/tray/dice)의
+        // 공통 조상인 root에 붙여 광원 엔티티를 가리키게 한다. 둘 다 같은 leaf
+        // 엔티티에 붙이면 광원이 자기 자신만 비추고 눈에 보이는 지오메트리는
+        // 아무것도 이 IBL을 받지 못한다 (리뷰에서 지적됨).
+        if let ibl = lighting.findEntity(named: "ibl") {
+            root.components.set(ImageBasedLightReceiverComponent(imageBasedLight: ibl))
+        }
         return root
     }
 
@@ -133,7 +142,7 @@ enum DiceSceneBuilder {
         var component = ImageBasedLightComponent(source: .single(resource), intensityExponent: 1.0)
         component.inheritsRotation = true
         entity.components.set(component)
-        entity.components.set(ImageBasedLightReceiverComponent(imageBasedLight: entity))
+        // 수신 컴포넌트는 여기 붙이지 않는다 — 비출 대상의 조상(root)에 붙는다 (makeRoot 참고).
         return entity
     }
 
