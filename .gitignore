@@ -11,5 +11,13 @@ xcuserdata/
 
 # iCloud Drive가 동기화 충돌 시 만드는 사본. 이 저장소는 iCloud 안에 있다.
 # "Info 2.plist" 같은 이름으로 생기며, git add -A 에 딸려 들어가기 쉽다.
-* [0-9].*
+# 넓은 glob(`* [0-9].*`)은 "roll 2.wav" 같은 정상 에셋까지 삼키므로
+# 소스·설정 확장자에만 건다.
+* [0-9].plist
+* [0-9].swift
+* [0-9].yml
+* [0-9].yaml
+* [0-9].json
+* [0-9].bin
+* [0-9].md
 .*.icloud

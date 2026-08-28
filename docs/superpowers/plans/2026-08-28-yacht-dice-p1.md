@@ -4223,7 +4223,28 @@ xcodebuild test -project YachtDice.xcodeproj -scheme YachtDice \
 ```
 Expected: 컴파일 실패 — `cannot find 'DiceStage' in scope`
 
-- [ ] **Step 3: `DiceStage.swift` 작성**
+- [ ] **Step 3: `DiceSceneBuilder`를 `@MainActor`로 격리한다**
+
+Task 13 리뷰가 지적한 것. `DiceSceneBuilder`의 static 메서드들이 nonisolated인데 RealityKit API가 MainActor 격리되어 있어 빌드마다 경고가 약 30개 난다. RealityKit이 `@preconcurrency`라 오류가 아니라 경고에 그치지만, 경고 30개가 상시로 깔리면 진짜 경고가 묻힌다.
+
+이제 실제 호출자(`DiceStage`)가 `@MainActor`이므로 격리를 맞출 수 있다. `App/Scene3D/DiceSceneBuilder.swift`의 `enum DiceSceneBuilder` 선언에 `@MainActor`를 붙인다:
+
+```swift
+@MainActor
+enum DiceSceneBuilder {
+```
+
+`DiePipTexture`는 CoreGraphics만 쓰므로 건드리지 않는다.
+
+빌드해서 경고가 실제로 사라졌는지 확인하고, 남은 경고 수를 보고한다:
+
+```bash
+xcodebuild build -project YachtDice.xcodeproj -scheme YachtDice \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -derivedDataPath /private/tmp/yd-dd 2>&1 | grep -c "warning:"
+```
+
+- [ ] **Step 4: `DiceStage.swift` 작성**
 
 ```swift
 import Foundation
@@ -4355,7 +4376,7 @@ final class DiceStage {
 }
 ```
 
-- [ ] **Step 4: `DiceStageView.swift` 작성**
+- [ ] **Step 5: `DiceStageView.swift` 작성**
 
 ```swift
 import SwiftUI
@@ -4373,7 +4394,7 @@ struct DiceStageView: View {
 }
 ```
 
-- [ ] **Step 5: 테스트 통과 확인**
+- [ ] **Step 6: 테스트 통과 확인**
 
 ```bash
 xcodebuild test -project YachtDice.xcodeproj -scheme YachtDice \
@@ -4382,7 +4403,7 @@ xcodebuild test -project YachtDice.xcodeproj -scheme YachtDice \
 ```
 Expected: PASS (5 tests)
 
-- [ ] **Step 6: 커밋**
+- [ ] **Step 7: 커밋**
 
 ```bash
 git add App Tests
