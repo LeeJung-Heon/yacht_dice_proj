@@ -98,6 +98,25 @@ public struct GameState: Equatable, Codable, Sendable {
         return false
     }
 
+    /// 신뢰할 수 없는 출처(저장 파일, 나중에는 네트워크)에서 온 이벤트가 적용 가능한지 검사한다.
+    ///
+    /// `applying(_:)`의 precondition들은 신뢰하는 호출자를 위한 불변식이라 위반하면 트랩을 낸다.
+    /// 트랩은 잡을 수 없으므로, 손상된 저장 파일이 앱을 실행 즉시 죽이는 것을 막으려면
+    /// 신뢰 경계에서 먼저 이 검사를 통과시켜야 한다. 부작용은 없다.
+    public func canApply(_ event: Event) -> Bool {
+        switch event {
+        case .rolled(let values):
+            return values.count == rollableIndices.count
+                && values.allSatisfy { (1...6).contains($0) }
+        case .holdToggled(let index):
+            return (0..<YachtCore.diceCount).contains(index)
+        case .committed(let category, _):
+            return !scorecards[currentPlayer].isFilled(category)
+        case .turnAdvanced, .gameEnded:
+            return true
+        }
+    }
+
     public static func replaying(_ events: [Event], playerCount: Int) -> GameState {
         events.reduce(GameState(playerCount: playerCount)) { $0.applying($1) }
     }

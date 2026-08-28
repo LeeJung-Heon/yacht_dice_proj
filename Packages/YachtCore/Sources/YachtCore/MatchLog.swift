@@ -6,6 +6,8 @@ public struct MatchLog: Equatable, Codable, Sendable {
 
     public enum DecodingFailure: Error, Equatable {
         case unsupportedVersion(Int)
+        case invalidPlayerCount(Int)
+        case corruptedLog(eventIndex: Int)
     }
 
     public private(set) var formatVersion: Int
@@ -32,10 +34,24 @@ public struct MatchLog: Equatable, Codable, Sendable {
         return try encoder.encode(self)
     }
 
+    /// 저장 파일은 신뢰할 수 없는 입력이다. JSON 구조가 멀쩡해도 내용이 깨져 있을 수 있고,
+    /// 그런 로그를 그대로 돌려주면 나중에 state를 읽는 순간 프로세스가 죽는다.
+    /// 여기서 끝까지 재생해보고, 안 되면 던진다.
     public static func decoded(from data: Data) throws -> MatchLog {
         let log = try JSONDecoder().decode(MatchLog.self, from: data)
         guard log.formatVersion == Self.formatVersion else {
             throw DecodingFailure.unsupportedVersion(log.formatVersion)
+        }
+        guard log.playerCount >= 1 else {
+            throw DecodingFailure.invalidPlayerCount(log.playerCount)
+        }
+
+        var state = GameState(playerCount: log.playerCount)
+        for (index, event) in log.events.enumerated() {
+            guard state.canApply(event) else {
+                throw DecodingFailure.corruptedLog(eventIndex: index)
+            }
+            state = state.applying(event)
         }
         return log
     }
