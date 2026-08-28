@@ -34,6 +34,11 @@ final class AppContainer {
     private let store = MatchStore.default
 
     init() {
+        // UI 테스트가 깨끗한 상태에서 시작할 수 있게 한다
+        if ProcessInfo.processInfo.arguments.contains("-resetMatch") {
+            try? MatchStore.default.clear()
+        }
+
         do {
             let stage = DiceStage(library: try TrajectoryLibrary.bundled())
             let restored = (try? store.load()) ?? nil

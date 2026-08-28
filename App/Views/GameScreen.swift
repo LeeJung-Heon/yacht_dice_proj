@@ -31,9 +31,18 @@ struct GameScreen: View {
 
     private var header: some View {
         HStack {
-            Text("Turn \(session.visibleState.turnIndex)/\(YachtCore.turnCount)")
-                .font(.system(.headline, design: .rounded))
-                .monospacedDigit()
+            // combine을 이 Group에만 걸어서 header.turn의 label이 항상 턴
+            // 텍스트가 되게 한다. 바깥 HStack 전체에 걸면 "게임 종료"까지
+            // 합쳐져서 두 상태를 구분할 라벨도, 별도로 찾을 static text도
+            // 없어진다.
+            Group {
+                Text("Turn \(session.visibleState.turnIndex)/\(YachtCore.turnCount)")
+                    .font(.system(.headline, design: .rounded))
+                    .monospacedDigit()
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("header.turn")
+            .accessibilityRemoveTraits(.isStaticText)
             Spacer()
             if session.visibleState.phase == .finished {
                 Text("게임 종료").font(.headline).foregroundStyle(.green)
@@ -41,8 +50,6 @@ struct GameScreen: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .accessibilityIdentifier("header.turn")
-        .accessibilityElement(children: .combine)
     }
 
     /// 위로 쓸어올리면 던진다. 좌우 성분으로 궤적 그룹을 고른다.
