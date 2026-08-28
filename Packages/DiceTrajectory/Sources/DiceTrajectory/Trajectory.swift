@@ -52,7 +52,6 @@ public struct Trajectory: Equatable, Sendable {
     }
 
     public var frameCount: Int { frames.count }
-    public var duration: TimeInterval { Double(frameCount) / Double(frameRate) }
 
     public func restUpFace(die: Int) -> Int { Int(restUpFaces[die]) }
 

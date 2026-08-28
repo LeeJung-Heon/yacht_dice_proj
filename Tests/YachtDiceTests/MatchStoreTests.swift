@@ -23,7 +23,7 @@ struct MatchStoreTests {
         log.append(.committed(.yacht, 50))
         try store.save(log)
 
-        let loaded = try #require(try store.load())
+        let loaded = try #require(store.load())
         #expect(loaded == log)
         #expect(loaded.state.scorecards[0].entry(.yacht) == 50)
     }
@@ -32,7 +32,7 @@ struct MatchStoreTests {
     func 없음() throws {
         let (store, directory) = try makeTempStore()
         defer { try? FileManager.default.removeItem(at: directory) }
-        #expect(try store.load() == nil)
+        #expect(store.load() == nil)
     }
 
     @Test("clear하면 사라진다")
@@ -44,7 +44,7 @@ struct MatchStoreTests {
         log.append(.rolled([1, 1, 1, 1, 1]))
         try store.save(log)
         try store.clear()
-        #expect(try store.load() == nil)
+        #expect(store.load() == nil)
     }
 
     @Test("깨진 파일은 nil로 처리하고 앱을 막지 않는다")
@@ -53,7 +53,7 @@ struct MatchStoreTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         try Data("이건 JSON이 아니다".utf8).write(to: directory.appending(path: "match.json"))
-        #expect(try store.load() == nil, "깨진 저장 파일 때문에 앱이 시작되지 못하면 안 된다")
+        #expect(store.load() == nil, "깨진 저장 파일 때문에 앱이 시작되지 못하면 안 된다")
     }
 
     @Test("끝난 게임은 저장하지 않는다")
@@ -69,6 +69,6 @@ struct MatchStoreTests {
         }
         log.append(.gameEnded)
         try store.save(log)
-        #expect(try store.load() == nil, "끝난 게임을 복원하면 결과 화면에 갇힌다")
+        #expect(store.load() == nil, "끝난 게임을 복원하면 결과 화면에 갇힌다")
     }
 }

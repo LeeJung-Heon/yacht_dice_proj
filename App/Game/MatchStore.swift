@@ -28,8 +28,8 @@ struct MatchStore: Sendable {
     }
 
     /// 읽기 실패는 오류로 올리지 않는다. 저장 파일 하나 때문에 앱이 시작조차
-    /// 못 하는 것보다, 새 판으로 시작하는 편이 낫다.
-    func load() throws -> MatchLog? {
+    /// 못 하는 것보다, 새 판으로 시작하는 편이 낫다. 그래서 throws가 아니다.
+    func load() -> MatchLog? {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
         guard let data = try? Data(contentsOf: fileURL),
               let log = try? MatchLog.decoded(from: data),

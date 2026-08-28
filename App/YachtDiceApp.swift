@@ -8,8 +8,6 @@ struct YachtDiceApp: App {
     var body: some Scene {
         WindowGroup {
             switch container.status {
-            case .loading:
-                ProgressView("불러오는 중")
             case .ready(let session, let stage):
                 GameScreen(session: session, stage: stage)
             case .failed(let message):
@@ -20,17 +18,16 @@ struct YachtDiceApp: App {
     }
 }
 
-/// 앱 조립을 한 곳에 모은다. Task 18에서 저장 복원이 여기 붙는다.
+/// 앱 조립을 한 곳에 모은다. 복원은 동기라서 로딩 상태가 따로 없다.
 @MainActor
 @Observable
 final class AppContainer {
     enum Status {
-        case loading
         case ready(GameSession, DiceStage)
         case failed(String)
     }
 
-    private(set) var status: Status = .loading
+    private(set) var status: Status
     private let store = MatchStore.default
 
     init() {
@@ -41,7 +38,7 @@ final class AppContainer {
 
         do {
             let stage = DiceStage(library: try TrajectoryLibrary.bundled())
-            let restored = (try? store.load()) ?? nil
+            let restored = store.load()
             let session = GameSession(driver: LocalDriver(), stage: stage,
                                       log: restored ?? MatchLog(playerCount: 1))
 
