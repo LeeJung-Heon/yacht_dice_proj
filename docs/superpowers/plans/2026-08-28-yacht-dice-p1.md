@@ -20,6 +20,8 @@
 - 점수 규칙은 스펙 §4.2 표가 유일한 근거다. 4 of a Kind와 Full House는 **주사위 5개 총합**, S.Straight 15 고정, L.Straight 30 고정, Yacht 50 고정. 조커 룰 없음, 야추 추가 보너스 없음. Full House는 5개 동일도 인정한다.
 - 주사위 면 배치는 서양식 오른손 주사위: 로컬 +Y=1, -Y=6, +Z=2, -Z=5, +X=3, -X=4. 마주 보는 면의 합은 7이고 1·2·3이 한 꼭짓점을 반시계로 돈다.
 - 수익화 코드(IAP·광고·분석 SDK) 일절 없음.
+- **`xcodebuild`의 `-derivedDataPath`는 반드시 저장소 밖(`/private/tmp` 아래)을 가리킨다.** 이 저장소는 iCloud Drive에 있어서 리포지토리 내부로 빌드하면 codesign이 `resource fork, Finder information, or similar detritus not allowed`로 실패한다 (Task 2 스파이크 실측).
+- **정지 자세를 축정렬로 스냅하지 않는다.** 바닥에 누운 주사위는 yaw가 연속적으로 자유롭다. 회전 오프셋 Δ는 `q_rest` 전체가 아니라 위를 향한 눈 `u`에만 의존한다 (스펙 §7.3).
 - 저장소 경로에 공백이 있다(`.../com~apple~CloudDocs/yacht_dice_proj`). 모든 셸 명령에서 경로를 따옴표로 감싼다.
 - 커밋 메시지는 무엇을 왜 바꿨는지 한국어로 쓰고 다음 줄로 끝낸다:
   `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`
@@ -1890,9 +1892,12 @@ MSG
   - `public enum DieFace` — `static let faces: [(value: Int, normal: SIMD3<Float>)]`, `static func normal(of: Int) -> SIMD3<Float>`, `static func upValue(for: simd_quatf) -> Int`
   - `public enum OctahedralGroup` — `static let elements: [simd_quatf]` (정확히 24개)
   - `static func isSameRotation(_:_:tolerance:) -> Bool`
-  - `static func snap(_ q: simd_quatf) -> (orientation: simd_quatf, index: Int, errorRadians: Float)`
-  - `static func orientations(showing value: Int) -> [simd_quatf]`
+  - `static func angle(between:and:) -> Float`
+  - `static func elements(mapping source: Int, to destination: Int) -> [simd_quatf]` — 눈 `source`의 법선을 눈 `destination`의 법선으로 보내는 원소들. 항상 정확히 4개
   - `static func preservesCube(_ q: simd_quatf, tolerance: Float) -> Bool`
+  - `public enum DieFace` 추가분 — `static func upFaceTiltRadians(for q: simd_quatf) -> Float`
+
+**스냅 함수는 만들지 않는다.** 정지 자세를 24개 중 하나로 스냅하면 멈춘 주사위가 최대 45° 돌아간다 (스펙 §7.3). Δ는 위를 향한 눈에만 의존하므로 스냅이 필요 없다.
 
 - [ ] **Step 1: 실패하는 테스트 작성**
 
@@ -1954,10 +1959,10 @@ struct OctahedralGroupTests {
         }
     }
 
-    @Test("각 눈이 위를 향하는 자세가 정확히 4개씩이다", arguments: 1...6)
+    @Test("각 눈이 위를 향하는 축정렬 자세가 정확히 4개씩이다", arguments: 1...6)
     func 눈별_자세_개수(value: Int) {
-        #expect(OctahedralGroup.orientations(showing: value).count == 4,
-                "눈 \(value)가 위인 자세는 Y축 자전 4가지여야 한다")
+        let matching = OctahedralGroup.elements.filter { DieFace.upValue(for: $0) == value }
+        #expect(matching.count == 4, "눈 \(value)가 위인 축정렬 자세는 Y축 자전 4가지여야 한다")
     }
 
     @Test("모든 원소가 정육면체를 자기 자신으로 보낸다")
@@ -1980,17 +1985,43 @@ struct OctahedralGroupTests {
         }
     }
 
-    @Test("살짝 흔들린 자세를 가장 가까운 축정렬로 스냅한다")
-    func 스냅() {
-        for target in OctahedralGroup.elements {
-            // 1.5도쯤 임의 축으로 흔든다
-            let wobble = simd_quatf(angle: 1.5 * .pi / 180, axis: simd_normalize(SIMD3<Float>(0.3, 0.8, -0.5)))
-            let wobbled = simd_normalize(simd_mul(wobble, target))
-            let result = OctahedralGroup.snap(wobbled)
-            #expect(OctahedralGroup.isSameRotation(result.orientation, target), "엉뚱한 자세로 스냅했다")
-            #expect(result.errorRadians < 2.0 * .pi / 180, "스냅 오차가 2도를 넘는다")
-            #expect(OctahedralGroup.elements.indices.contains(result.index))
+    @Test("어떤 눈에서 어떤 눈으로 보내는 원소가 정확히 4개씩이다")
+    func 면_대응_원소_개수() {
+        for source in 1...6 {
+            for destination in 1...6 {
+                let mapped = OctahedralGroup.elements(mapping: source, to: destination)
+                #expect(mapped.count == 4, "\(source)→\(destination) 원소가 \(mapped.count)개다")
+                for element in mapped {
+                    let moved = element.act(DieFace.normal(of: source))
+                    #expect(simd_length(moved - DieFace.normal(of: destination)) < 1e-4,
+                            "\(source)→\(destination) 원소가 법선을 엉뚱한 곳으로 보낸다")
+                }
+            }
         }
+    }
+
+    @Test("윗면 기울기는 yaw에 영향받지 않는다")
+    func 윗면_기울기는_yaw와_무관() {
+        // 스펙 §7.3: 바닥에 누운 주사위는 yaw가 자유롭다.
+        // 24개 최근접 거리로 재면 최대 45도가 나오지만 윗면 기울기는 0이어야 한다.
+        for yawDegrees in stride(from: Float(0), to: 360, by: 7) {
+            let yaw = simd_quatf(angle: yawDegrees * .pi / 180, axis: SIMD3<Float>(0, 1, 0))
+            for base in OctahedralGroup.elements {
+                let resting = simd_normalize(simd_mul(yaw, base))
+                let tilt = DieFace.upFaceTiltRadians(for: resting) * 180 / .pi
+                #expect(tilt < 0.1, "yaw \(yawDegrees)도에서 윗면 기울기가 \(tilt)도로 나왔다")
+            }
+        }
+    }
+
+    @Test("실제로 기울어진 자세는 윗면 기울기로 잡힌다")
+    func 기울기_감지() {
+        let tiltAngle: Float = 5
+        let tilted = simd_normalize(simd_mul(
+            simd_quatf(angle: tiltAngle * .pi / 180, axis: SIMD3<Float>(1, 0, 0)),
+            OctahedralGroup.elements[0]))
+        let measured = DieFace.upFaceTiltRadians(for: tilted) * 180 / .pi
+        #expect(abs(measured - tiltAngle) < 0.2, "5도 기울였는데 \(measured)도로 측정됐다")
     }
 }
 ```
@@ -2038,6 +2069,18 @@ public enum DieFace {
             if dot > bestDot { bestDot = dot; best = face.value }
         }
         return best
+    }
+
+    /// 위를 향한 면의 법선이 +Y에서 얼마나 벗어났는가 (라디안).
+    ///
+    /// 정지 판정의 올바른 척도다. 24개 축정렬 자세와의 거리로 재면
+    /// 바닥에 평평하게 누운 주사위도 자유로운 yaw 때문에 최대 45°가 나온다 (스펙 §7.3).
+    public static func upFaceTiltRadians(for orientation: simd_quatf) -> Float {
+        var bestDot = -Float.infinity
+        for face in faces {
+            bestDot = max(bestDot, orientation.act(face.normal).y)
+        }
+        return acos(min(1, max(-1, bestDot)))
     }
 }
 ```
@@ -2096,21 +2139,14 @@ public enum OctahedralGroup {
         return 2 * acos(dot)
     }
 
-    /// 흔들린 자세를 가장 가까운 축정렬 자세로 스냅한다.
-    /// 베이커가 정지 자세를 기록할 때 반드시 통과시켜야 하는 관문이다.
-    public static func snap(_ orientation: simd_quatf) -> (orientation: simd_quatf, index: Int, errorRadians: Float) {
-        var bestIndex = 0
-        var bestAngle = Float.infinity
-        for (index, element) in elements.enumerated() {
-            let a = angle(between: element, and: orientation)
-            if a < bestAngle { bestAngle = a; bestIndex = index }
-        }
-        return (elements[bestIndex], bestIndex, bestAngle)
-    }
-
-    /// 눈 value가 위를 향하는 자세들. Y축 자전만큼 정확히 4개다.
-    public static func orientations(showing value: Int) -> [simd_quatf] {
-        elements.filter { DieFace.upValue(for: $0) == value }
+    /// 눈 `source`의 법선을 눈 `destination`의 법선으로 보내는 원소들.
+    ///
+    /// O는 6개 면 법선에 추이적으로 작용하고 각 법선의 안정자군 위수가 4이므로
+    /// 결과는 항상 정확히 4개다. 이 4개가 회전 오프셋의 yaw 다양성을 만든다.
+    public static func elements(mapping source: Int, to destination: Int) -> [simd_quatf] {
+        let target = DieFace.normal(of: destination)
+        let origin = DieFace.normal(of: source)
+        return elements.filter { simd_length($0.act(origin) - target) < 1e-4 }
     }
 
     /// q가 정육면체를 자기 자신으로 보내는가 —
@@ -2141,9 +2177,13 @@ git add Packages/DiceTrajectory
 git commit -m "$(cat <<'MSG'
 feat(trajectory): 주사위 면 배치와 정육면체 회전 대칭군
 
-스펙 7.3의 정확성 논증이 이 군 위에 서 있다. 정지 자세를 이 24개 중 하나로
-스냅해두면 회전 오프셋이 반드시 대칭군 원소가 되고, 그러면 회전된 주사위가
-매 프레임 원본과 정확히 같은 공간을 점유한다. 근사가 아니라 동일한 궤적이다.
+스펙 7.3의 정확성 논증이 이 군 위에 서 있다. 오프셋을 이 24개 중에서만 고르면
+회전된 주사위가 매 프레임 원본과 정확히 같은 공간을 점유한다. 근사가 아니라
+동일한 궤적이다.
+
+정지 자세를 축정렬로 스냅하는 함수는 일부러 만들지 않았다. 바닥에 누운 주사위는
+yaw가 연속적으로 자유로워서 스냅하면 멈춘 주사위가 최대 45도 돌아간다. 대신
+윗면 기울기만 재는 upFaceTiltRadians를 뒀다 — 정지 판정에 필요한 건 그것뿐이다.
 
 24개를 오일러각 훑기로 만들면 허용 오차에 따라 개수가 흔들려서, 90도 회전
 3개에서 시작하는 곱셈 폐포로 만들었다. 개수와 닫힘성을 테스트로 고정했다.
@@ -2160,17 +2200,20 @@ MSG
 
 ### Task 10: 회전 오프셋 — 목표 눈 맞추기
 
-스펙 §7.2의 `q'(t) = q(t) · Δ`. 곱하는 **방향**이 핵심이다. 몸통 프레임 회전이므로 오른쪽에서 곱해야 하며, 왼쪽에서 곱하면 궤적이 통째로 회전해 주사위가 트레이 밖으로 나간다.
+스펙 §7.2의 `q'(t) = q(t) · Δ`. 두 가지가 핵심이다.
+
+1. **곱하는 방향.** 몸통 프레임 회전이므로 오른쪽에서 곱해야 한다. 왼쪽에서 곱하면 궤적이 통째로 회전해 주사위가 트레이 밖으로 나간다.
+2. **Δ는 정지 자세 전체가 아니라 "위를 향한 눈"에만 의존한다.** 바닥에 누운 주사위는 yaw가 연속적으로 자유로우므로 정지 자세는 일반적으로 축정렬이 아니다 (스펙 §7.3, Task 2 스파이크 실측). Δ를 `q_rest⁻¹ · q_target` 으로 계산하면 그 자유로운 yaw까지 되돌려버려 멈춘 주사위가 최대 45° 홱 돌아간다.
 
 **Files:**
 - Create: `Packages/DiceTrajectory/Sources/DiceTrajectory/FaceControl.swift`
 - Create: `Packages/DiceTrajectory/Tests/DiceTrajectoryTests/FaceControlTests.swift`
 
 **Interfaces:**
-- Consumes: Task 9의 `DieFace`, `OctahedralGroup`
+- Consumes: Task 9의 `DieFace`, `OctahedralGroup.elements(mapping:to:)`
 - Produces:
   - `public enum FaceControl`
-  - `static func offset(restOrientation: simd_quatf, showing value: Int, yawChoice: Int) -> simd_quatf`
+  - `static func offset(restUpFace: Int, showing value: Int, yawChoice: Int) -> simd_quatf`
   - `static func apply(_ offset: simd_quatf, to frame: simd_quatf) -> simd_quatf`
 
 - [ ] **Step 1: 실패하는 테스트 작성**
@@ -2185,17 +2228,47 @@ import simd
 @Suite("회전 오프셋")
 struct FaceControlTests {
 
+    /// 물리가 실제로 만들어내는 정지 자세를 흉내낸다.
+    /// 축정렬이 **아니다** — 수직축 둘레 yaw가 자유롭고 약간의 기울기가 남는다.
+    private static func restingOrientations() -> [(orientation: simd_quatf, upFace: Int)] {
+        var out: [(simd_quatf, Int)] = []
+        for base in OctahedralGroup.elements {
+            for yawDegrees in stride(from: Float(0), to: 360, by: 37) {
+                let yaw = simd_quatf(angle: yawDegrees * .pi / 180, axis: SIMD3<Float>(0, 1, 0))
+                // 물리가 남기는 잔여 기울기 (스파이크 실측 0.03도, 여유를 둬 1.5도)
+                let tilt = simd_quatf(angle: 1.5 * .pi / 180,
+                                      axis: simd_normalize(SIMD3<Float>(0.6, 0, -0.8)))
+                let resting = simd_normalize(simd_mul(simd_mul(tilt, yaw), base))
+                out.append((resting, DieFace.upValue(for: resting)))
+            }
+        }
+        return out
+    }
+
     /// 스펙 §11이 "이 프로젝트에서 가장 중요한 테스트"로 지목한 것.
     /// 여기가 깨지면 온라인 대전이 통째로 무너진다.
-    @Test("모든 정지 자세 x 모든 목표 눈 x 모든 yaw에서 목표 눈이 위로 온다", arguments: 1...6)
+    @Test("축정렬이 아닌 정지 자세에서도 목표 눈이 위로 온다", arguments: 1...6)
     func 목표_눈이_위로_온다(value: Int) {
-        for rest in OctahedralGroup.elements {
+        for (resting, upFace) in Self.restingOrientations() {
             for yaw in 0..<4 {
-                let delta = FaceControl.offset(restOrientation: rest, showing: value, yawChoice: yaw)
-                let final = FaceControl.apply(delta, to: rest)
+                let delta = FaceControl.offset(restUpFace: upFace, showing: value, yawChoice: yaw)
+                let final = FaceControl.apply(delta, to: resting)
                 #expect(DieFace.upValue(for: final) == value,
                         "눈 \(value), yaw \(yaw)에서 \(DieFace.upValue(for: final))가 나왔다")
             }
+        }
+    }
+
+    @Test("오프셋을 적용해도 윗면 기울기가 커지지 않는다", arguments: 1...6)
+    func 기울기_보존(value: Int) {
+        // 물리가 만든 잔여 기울기는 그대로 물려받아야 한다.
+        // 커진다면 Δ가 대칭군 밖으로 나간 것이다.
+        for (resting, upFace) in Self.restingOrientations() {
+            let before = DieFace.upFaceTiltRadians(for: resting)
+            let delta = FaceControl.offset(restUpFace: upFace, showing: value, yawChoice: 0)
+            let after = DieFace.upFaceTiltRadians(for: FaceControl.apply(delta, to: resting))
+            #expect(abs(after - before) < 1e-3,
+                    "기울기가 \(before * 180 / .pi)도에서 \(after * 180 / .pi)도로 변했다")
         }
     }
 
@@ -2203,9 +2276,9 @@ struct FaceControlTests {
     func 오프셋은_대칭군_원소다(value: Int) {
         // 이것이 성립해야 "회전된 주사위가 매 프레임 원본과 같은 공간을 점유한다"는
         // 스펙 §7.3의 논증이 성립한다.
-        for rest in OctahedralGroup.elements {
+        for upFace in 1...6 {
             for yaw in 0..<4 {
-                let delta = FaceControl.offset(restOrientation: rest, showing: value, yawChoice: yaw)
+                let delta = FaceControl.offset(restUpFace: upFace, showing: value, yawChoice: yaw)
                 #expect(OctahedralGroup.preservesCube(delta, tolerance: 1e-4),
                         "오프셋이 정육면체를 보존하지 않는다 — 궤적의 기하가 달라진다")
                 #expect(OctahedralGroup.elements.contains { OctahedralGroup.isSameRotation($0, delta) },
@@ -2216,48 +2289,50 @@ struct FaceControlTests {
 
     @Test("yaw 4가지가 서로 다른 자세를 만든다", arguments: 1...6)
     func yaw가_다양성을_만든다(value: Int) {
-        let rest = OctahedralGroup.elements[0]
-        let finals = (0..<4).map { yaw in
-            FaceControl.apply(FaceControl.offset(restOrientation: rest, showing: value, yawChoice: yaw), to: rest)
-        }
+        let deltas = (0..<4).map { FaceControl.offset(restUpFace: 1, showing: value, yawChoice: $0) }
         for i in 0..<4 {
             for j in (i + 1)..<4 {
-                #expect(!OctahedralGroup.isSameRotation(finals[i], finals[j]),
-                        "yaw \(i)와 \(j)가 같은 자세를 만든다")
+                #expect(!OctahedralGroup.isSameRotation(deltas[i], deltas[j]),
+                        "yaw \(i)와 \(j)가 같은 오프셋을 만든다")
             }
         }
     }
 
     @Test("yawChoice는 음수나 큰 수여도 안전하게 감긴다")
     func yaw_인덱스_감기() {
-        let rest = OctahedralGroup.elements[3]
-        let a = FaceControl.offset(restOrientation: rest, showing: 4, yawChoice: 1)
-        let b = FaceControl.offset(restOrientation: rest, showing: 4, yawChoice: 5)
-        let c = FaceControl.offset(restOrientation: rest, showing: 4, yawChoice: -3)
+        let a = FaceControl.offset(restUpFace: 3, showing: 4, yawChoice: 1)
+        let b = FaceControl.offset(restUpFace: 3, showing: 4, yawChoice: 5)
+        let c = FaceControl.offset(restUpFace: 3, showing: 4, yawChoice: -3)
         #expect(OctahedralGroup.isSameRotation(a, b))
         #expect(OctahedralGroup.isSameRotation(a, c))
     }
 
-    @Test("오프셋을 궤적 중간 프레임에 적용해도 위치는 건드리지 않는다")
-    func 위치_불변() {
-        // 오프셋은 자세에만 곱한다. 이 테스트는 apply(_:to:)의 시그니처가
-        // 위치를 받지 않는다는 사실을 문서로 고정하는 역할이다.
-        let rest = OctahedralGroup.elements[7]
-        let delta = FaceControl.offset(restOrientation: rest, showing: 2, yawChoice: 0)
-        let midFrame = simd_normalize(simd_quatf(angle: 1.234, axis: simd_normalize(SIMD3<Float>(0.2, -0.7, 0.4))))
-        let rotated = FaceControl.apply(delta, to: midFrame)
-        #expect(abs(simd_length(rotated.vector) - 1) < 1e-4, "정규화가 풀렸다")
+    @Test("같은 눈을 요청하면 오프셋이 항등이 되는 경우가 있다")
+    func 항등_케이스() {
+        // 이미 6이 위인 주사위에 6을 요청하면 면을 옮길 필요가 없다.
+        let delta = FaceControl.offset(restUpFace: 6, showing: 6, yawChoice: 0)
+        let identity = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+        let anyIsIdentity = (0..<4).contains { yaw in
+            OctahedralGroup.isSameRotation(
+                FaceControl.offset(restUpFace: 6, showing: 6, yawChoice: yaw), identity)
+        }
+        #expect(anyIsIdentity, "같은 면을 요청했는데 항등 오프셋이 하나도 없다")
+        #expect(OctahedralGroup.preservesCube(delta, tolerance: 1e-4))
     }
 
     @Test("왼쪽 곱셈은 틀린 답을 낸다 — 곱하는 방향이 중요하다")
     func 곱셈_방향() {
-        // 이 테스트는 회귀 방지용이다. 누군가 simd_mul의 인자 순서를 뒤집으면 여기서 잡힌다.
-        let rest = OctahedralGroup.elements.first { DieFace.upValue(for: $0) != 6 }!
-        let delta = FaceControl.offset(restOrientation: rest, showing: 6, yawChoice: 0)
-        let correct = simd_mul(rest, delta)     // 오른쪽 곱셈 = 몸통 프레임
-        let wrong = simd_mul(delta, rest)       // 왼쪽 곱셈 = 월드 프레임
-        #expect(DieFace.upValue(for: correct) == 6)
-        #expect(DieFace.upValue(for: wrong) != 6, "왼쪽 곱셈이 우연히 맞았다 — 더 어려운 케이스를 골라야 한다")
+        // 회귀 방지용. 누군가 simd_mul의 인자 순서를 뒤집으면 여기서 잡힌다.
+        // 정지 자세에 yaw를 섞어 두 방향이 우연히 일치하지 않게 한다.
+        let yaw = simd_quatf(angle: 40 * .pi / 180, axis: SIMD3<Float>(0, 1, 0))
+        let resting = simd_normalize(simd_mul(yaw, OctahedralGroup.elements[0]))
+        let upFace = DieFace.upValue(for: resting)
+        let target = (upFace % 6) + 1                       // 현재 윗면과 다른 눈
+        let delta = FaceControl.offset(restUpFace: upFace, showing: target, yawChoice: 0)
+
+        #expect(DieFace.upValue(for: simd_mul(resting, delta)) == target, "오른쪽 곱셈이 틀렸다")
+        #expect(DieFace.upValue(for: simd_mul(delta, resting)) != target,
+                "왼쪽 곱셈이 우연히 맞았다 — 더 어려운 케이스를 골라야 한다")
     }
 }
 ```
@@ -2279,26 +2354,33 @@ import simd
 
 /// 궤적을 다시 굴리지 않고 나오는 눈만 바꾸는 장치.
 ///
-/// 궤적의 정지 자세가 q_rest일 때, 눈 value가 위를 향하게 하려면
+/// 궤적에서 실제로 위를 향한 눈이 u일 때, 눈 v가 위를 향하게 하려면
 ///
-///     Δ = q_rest⁻¹ · q_target
+///     Δ ∈ O,  Δ(n_v) = n_u
 ///     q'(t) = q(t) · Δ
 ///
-/// 를 쓴다. t = rest를 넣으면 q_rest · q_rest⁻¹ · q_target = q_target 이 된다.
+/// 를 쓴다. 정지 시 q_rest(n_u) ≈ +Y 이므로
+/// q_rest(Δ(n_v)) = q_rest(n_u) ≈ +Y 가 되어 목표 눈이 위를 향한다.
 ///
-/// q_rest와 q_target이 모두 축정렬이므로 Δ는 정육면체 대칭군의 원소다.
-/// 따라서 회전된 주사위는 매 프레임 원본과 같은 공간을 점유한다 (스펙 §7.3).
+/// Δ가 정육면체 대칭군의 원소이므로 회전된 주사위는 매 프레임 원본과
+/// 같은 공간을 점유한다 (스펙 §7.3).
+///
+/// **정지 자세 전체가 아니라 위를 향한 눈에만 의존한다는 점이 중요하다.**
+/// 바닥에 누운 주사위는 수직축 둘레 yaw가 연속적으로 자유롭다.
+/// Δ를 q_rest⁻¹ · q_target 으로 계산하면 그 자유로운 yaw까지 되돌려
+/// 멈춘 주사위가 최대 45° 홱 돌아간다.
 public enum FaceControl {
 
     /// - Parameters:
-    ///   - restOrientation: 궤적에 기록된 정지 자세. 반드시 축정렬이어야 한다.
+    ///   - restUpFace: 이 궤적에서 실제로 위를 향한 눈 (1...6).
     ///   - value: 위로 오게 할 눈 (1...6).
-    ///   - yawChoice: 같은 눈을 보이는 4가지 자세 중 하나. 굴림마다 다르게 주면 화면이 덜 반복적으로 보인다.
-    public static func offset(restOrientation: simd_quatf, showing value: Int, yawChoice: Int) -> simd_quatf {
-        let candidates = OctahedralGroup.orientations(showing: value)
-        precondition(candidates.count == 4, "눈 \(value)가 위인 자세는 4개여야 한다")
+    ///   - yawChoice: 조건을 만족하는 4개 중 하나. 굴림마다 다르게 주면 화면이 덜 반복적으로 보인다.
+    public static func offset(restUpFace: Int, showing value: Int, yawChoice: Int) -> simd_quatf {
+        let candidates = OctahedralGroup.elements(mapping: value, to: restUpFace)
+        precondition(candidates.count == 4,
+                     "눈 \(value)를 \(restUpFace)로 보내는 원소는 4개여야 하는데 \(candidates.count)개다")
         let index = ((yawChoice % candidates.count) + candidates.count) % candidates.count
-        return simd_normalize(simd_mul(simd_inverse(restOrientation), candidates[index]))
+        return simd_normalize(candidates[index])
     }
 
     /// 몸통 프레임 회전이므로 **오른쪽에서** 곱한다.
@@ -2314,7 +2396,7 @@ public enum FaceControl {
 ```bash
 swift test --package-path "Packages/DiceTrajectory"
 ```
-Expected: PASS (전체). `목표_눈이_위로_온다`는 6 × 24 × 4 = 576 케이스를 검사한다.
+Expected: PASS (전체). `목표_눈이_위로_온다`는 6 × 24 × 10 × 4 = 5,760 케이스를 검사한다.
 
 - [ ] **Step 5: 커밋**
 
@@ -2323,14 +2405,16 @@ git add Packages/DiceTrajectory
 git commit -m "$(cat <<'MSG'
 feat(trajectory): 회전 오프셋으로 목표 눈 맞추기
 
-곱하는 방향이 핵심이다. 몸통 프레임 회전이라 오른쪽에서 곱해야 하고, 왼쪽에서
-곱하면 궤적 전체가 월드 기준으로 돌아 주사위가 트레이 밖으로 나간다. 인자
-순서를 뒤집으면 잡히도록 회귀 테스트를 따로 뒀다.
+오프셋은 정지 자세 전체가 아니라 위를 향한 눈에만 의존한다. 바닥에 누운 주사위는
+수직축 둘레 yaw가 연속적으로 자유로워서, q_rest 역수로 계산하면 그 자유로운 yaw까지
+되돌려 멈춘 주사위가 최대 45도 홱 돌아간다. Task 2 스파이크에서 윗면 기울기는
+0.03도인데 24개 최근접 거리가 1~40도로 나온 것이 이 자유도다.
 
-스펙 11장이 "가장 중요한 테스트"로 지목한 검증을 넣었다. 24개 정지 자세 x
-6개 목표 눈 x 4개 yaw = 576 케이스에서 목표 눈이 위로 오는지, 그리고 오프셋이
-항상 정육면체 대칭군 안에 있는지를 확인한다. 후자가 깨지면 궤적의 기하가
-달라져서 스펙 7.3의 논증이 무너진다.
+테스트를 축정렬 자세가 아니라 yaw를 섞고 기울기를 남긴 자세로 돌린다. 축정렬로만
+테스트하면 이 결함이 그대로 통과한다.
+
+곱하는 방향도 핵심이다. 몸통 프레임 회전이라 오른쪽에서 곱해야 하고, 인자 순서를
+뒤집으면 잡히도록 회귀 테스트를 뒀다.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 MSG
@@ -2341,7 +2425,7 @@ MSG
 
 ### Task 11: 궤적 자료구조·바이너리 포맷·검증기
 
-정지 자세를 쿼터니언이 아니라 **24개 군의 인덱스**로 저장하는 것이 요점이다. 부동소수점으로 저장하면 왕복 과정에서 미세하게 어긋나 Δ가 대칭군을 벗어난다.
+정지 자세를 통째로 저장하지 않고 **정지 시 위를 향한 눈(1~6)만** 저장하는 것이 요점이다. 회전 오프셋은 그 값에만 의존하고(스펙 §7.3), 정지 자세 자체는 마지막 프레임의 쿼터니언이 이미 갖고 있다.
 
 **Files:**
 - Create: `Packages/DiceTrajectory/Sources/DiceTrajectory/Trajectory.swift`
@@ -2355,8 +2439,8 @@ MSG
   - `public enum ThrowDirection: UInt8, CaseIterable, Sendable { case left = 0, center = 1, right = 2 }`
   - `public struct DiePose: Equatable, Sendable { var position: SIMD3<Float>; var orientation: simd_quatf }`
   - `public struct CollisionCue: Equatable, Sendable { let frame: UInt16; let dieIndex: UInt8; let intensity: Float }`
-  - `public struct Trajectory: Equatable, Sendable` — `id`, `dieCount`, `direction`, `frameRate`, `frames: [[DiePose]]`, `restOrientationIndices: [UInt8]`, `collisions: [CollisionCue]`
-  - `func Trajectory.restOrientation(die: Int) -> simd_quatf`
+  - `public struct Trajectory: Equatable, Sendable` — `id`, `dieCount`, `direction`, `frameRate`, `frames: [[DiePose]]`, `restUpFaces: [UInt8]`, `collisions: [CollisionCue]`
+  - `func Trajectory.restUpFace(die: Int) -> Int`
   - `func Trajectory.posed(die:frame:offset:) -> DiePose`
   - `public enum TrajectoryArchive` — `static func encode([Trajectory]) throws -> Data`, `static func decode(_ data: Data) throws -> [Trajectory]`
   - `public enum TrajectoryValidator` — `static func problems(in: Trajectory, trayInner: SIMD3<Float>, dieSize: Float) -> [String]`
@@ -2374,25 +2458,30 @@ import simd
 /// 테스트용 합성 궤적. 물리는 없고 포맷과 검증기만 확인한다.
 private func makeTrajectory(id: UInt16 = 1, dieCount: Int = 5, frameCount: Int = 90) -> Trajectory {
     var frames: [[DiePose]] = []
-    var restIndices: [UInt8] = []
+    var restPoses: [simd_quatf] = []
+    var restUpFaces: [UInt8] = []
     for die in 0..<dieCount {
-        restIndices.append(UInt8((die * 5) % OctahedralGroup.elements.count))
+        // 물리가 실제로 만드는 정지 자세를 흉내낸다 — 축정렬이 아니라 yaw가 자유롭다
+        let base = OctahedralGroup.elements[(die * 5) % OctahedralGroup.elements.count]
+        let yaw = simd_quatf(angle: Float(die) * 31 * .pi / 180, axis: SIMD3<Float>(0, 1, 0))
+        let rest = simd_normalize(simd_mul(yaw, base))
+        restPoses.append(rest)
+        restUpFaces.append(UInt8(DieFace.upValue(for: rest)))
     }
     for frame in 0..<frameCount {
         let t = Float(frame) / Float(frameCount - 1)
         var poses: [DiePose] = []
         for die in 0..<dieCount {
-            let rest = OctahedralGroup.elements[Int(restIndices[die])]
             let spin = simd_quatf(angle: (1 - t) * 8, axis: simd_normalize(SIMD3<Float>(0.3, 1, 0.2)))
             poses.append(DiePose(
                 position: SIMD3(Float(die - 2) * 0.02, 0.10 * (1 - t) + 0.008, -0.06 + 0.10 * t),
-                orientation: t >= 1 ? rest : simd_normalize(simd_mul(spin, rest))
+                orientation: t >= 1 ? restPoses[die] : simd_normalize(simd_mul(spin, restPoses[die]))
             ))
         }
         frames.append(poses)
     }
     return Trajectory(id: id, dieCount: dieCount, direction: .center, frameRate: 60,
-                      frames: frames, restOrientationIndices: restIndices,
+                      frames: frames, restUpFaces: restUpFaces,
                       collisions: [CollisionCue(frame: 12, dieIndex: 0, intensity: 0.8)])
 }
 
@@ -2411,7 +2500,7 @@ struct TrajectoryArchiveTests {
             #expect(a.direction == b.direction)
             #expect(a.frameRate == b.frameRate)
             #expect(a.frames.count == b.frames.count)
-            #expect(a.restOrientationIndices == b.restOrientationIndices, "정지 자세 인덱스는 손실 없이 보존돼야 한다")
+            #expect(a.restUpFaces == b.restUpFaces, "정지 시 윗면 값은 손실 없이 보존돼야 한다")
             #expect(a.collisions == b.collisions)
         }
     }
@@ -2431,15 +2520,18 @@ struct TrajectoryArchiveTests {
         }
     }
 
-    @Test("정지 자세는 양자화를 거치지 않는다 — 인덱스로 저장하기 때문")
-    func 정지_자세는_정확하다() throws {
+    @Test("정지 시 윗면 값은 양자화를 거치지 않는다 — 1바이트 정수로 저장하기 때문")
+    func 윗면_값은_정확하다() throws {
         let original = makeTrajectory()
         let restored = try TrajectoryArchive.decode(TrajectoryArchive.encode([original]))[0]
         for die in 0..<original.dieCount {
-            let a = original.restOrientation(die: die)
-            let b = restored.restOrientation(die: die)
-            #expect(OctahedralGroup.isSameRotation(a, b, tolerance: 1e-6),
-                    "정지 자세가 왕복에서 어긋났다 — 오프셋이 대칭군을 벗어난다")
+            #expect(original.restUpFace(die: die) == restored.restUpFace(die: die),
+                    "정지 시 윗면 값이 왕복에서 바뀌었다 — 오프셋이 엉뚱한 눈을 올린다")
+            // 마지막 프레임의 실제 자세에서 읽은 윗면과도 일치해야 한다
+            let last = restored.frames.count - 1
+            #expect(DieFace.upValue(for: restored.frames[last][die].orientation)
+                    == restored.restUpFace(die: die),
+                    "기록된 윗면 값이 마지막 프레임의 실제 자세와 다르다")
         }
     }
 
@@ -2501,7 +2593,7 @@ struct TrajectoryArchiveTests {
             for value in 1...6 {
                 for yaw in 0..<4 {
                     let offset = FaceControl.offset(
-                        restOrientation: trajectory.restOrientation(die: die),
+                        restUpFace: trajectory.restUpFace(die: die),
                         showing: value, yawChoice: yaw
                     )
                     let last = trajectory.frames.count - 1
@@ -2560,28 +2652,27 @@ public struct Trajectory: Equatable, Sendable {
     public let frameRate: Int
     /// frames[프레임][주사위]
     public var frames: [[DiePose]]
-    /// 각 주사위의 정지 자세를 OctahedralGroup.elements의 인덱스로 보관한다.
-    /// 쿼터니언으로 저장하면 왕복 양자화에서 어긋나 오프셋이 대칭군을 벗어난다.
-    public let restOrientationIndices: [UInt8]
+    /// 각 주사위가 정지했을 때 위를 향한 눈 (1...6).
+    /// 회전 오프셋은 이 값에만 의존하므로 정지 자세 전체를 따로 저장할 필요가 없다 (스펙 §7.3).
+    /// 정수라 양자화 손실이 없고, 정지 자세 자체는 마지막 프레임이 이미 갖고 있다.
+    public let restUpFaces: [UInt8]
     public let collisions: [CollisionCue]
 
     public init(id: UInt16, dieCount: Int, direction: ThrowDirection, frameRate: Int,
-                frames: [[DiePose]], restOrientationIndices: [UInt8], collisions: [CollisionCue]) {
+                frames: [[DiePose]], restUpFaces: [UInt8], collisions: [CollisionCue]) {
         self.id = id
         self.dieCount = dieCount
         self.direction = direction
         self.frameRate = frameRate
         self.frames = frames
-        self.restOrientationIndices = restOrientationIndices
+        self.restUpFaces = restUpFaces
         self.collisions = collisions
     }
 
     public var frameCount: Int { frames.count }
     public var duration: TimeInterval { Double(frameCount) / Double(frameRate) }
 
-    public func restOrientation(die: Int) -> simd_quatf {
-        OctahedralGroup.elements[Int(restOrientationIndices[die])]
-    }
+    public func restUpFace(die: Int) -> Int { Int(restUpFaces[die]) }
 
     /// 오프셋을 적용한 프레임 자세. 위치는 건드리지 않는다.
     public func posed(die: Int, frame: Int, offset: simd_quatf) -> DiePose {
@@ -2602,7 +2693,7 @@ import simd
 ///
 ///     헤더:  magic "YDTJ" (4B) | version UInt16 | count UInt32
 ///     궤적:  id UInt16 | dieCount UInt8 | direction UInt8 | frameRate UInt16 | frameCount UInt16
-///           | restIndices [UInt8 x dieCount]
+///           | restUpFaces [UInt8 x dieCount]  (각 1...6)
 ///           | collisionCount UInt16 | collisions [frame UInt16, die UInt8, intensity UInt8] x N
 ///           | frames [pos Float16 x3, quat Int16 x4] x (frameCount x dieCount)
 ///
@@ -2615,7 +2706,7 @@ public enum TrajectoryArchive {
         case badMagic
         case unsupportedVersion(UInt16)
         case truncated(at: Int)
-        case restIndexOutOfRange(UInt8)
+        case restUpFaceOutOfRange(UInt8)
     }
 
     public static func encode(_ trajectories: [Trajectory]) throws -> Data {
@@ -2630,7 +2721,7 @@ public enum TrajectoryArchive {
             out.append(trajectory.direction.rawValue)
             out.appendLE(UInt16(trajectory.frameRate))
             out.appendLE(UInt16(trajectory.frameCount))
-            out.append(contentsOf: trajectory.restOrientationIndices)
+            out.append(contentsOf: trajectory.restUpFaces)
 
             out.appendLE(UInt16(trajectory.collisions.count))
             for cue in trajectory.collisions {
@@ -2678,13 +2769,11 @@ public enum TrajectoryArchive {
             let frameRate: UInt16 = try data.readLE(at: &cursor)
             let frameCount: UInt16 = try data.readLE(at: &cursor)
 
-            var restIndices: [UInt8] = []
+            var restUpFaces: [UInt8] = []
             for _ in 0..<dieCount {
-                let index: UInt8 = try data.readLE(at: &cursor)
-                guard Int(index) < OctahedralGroup.elements.count else {
-                    throw Failure.restIndexOutOfRange(index)
-                }
-                restIndices.append(index)
+                let upFace: UInt8 = try data.readLE(at: &cursor)
+                guard (1...6).contains(upFace) else { throw Failure.restUpFaceOutOfRange(upFace) }
+                restUpFaces.append(upFace)
             }
 
             let collisionCount: UInt16 = try data.readLE(at: &cursor)
@@ -2722,7 +2811,7 @@ public enum TrajectoryArchive {
                 id: id, dieCount: Int(dieCount),
                 direction: ThrowDirection(rawValue: directionRaw) ?? .center,
                 frameRate: Int(frameRate), frames: frames,
-                restOrientationIndices: restIndices, collisions: collisions
+                restUpFaces: restUpFaces, collisions: collisions
             ))
         }
         return out
@@ -2771,8 +2860,8 @@ public enum TrajectoryValidator {
         let limitY = trayInner.y + margin
 
         guard trajectory.frameCount > 0 else { return ["프레임이 없다"] }
-        guard trajectory.restOrientationIndices.count == trajectory.dieCount else {
-            return ["정지 자세 개수(\(trajectory.restOrientationIndices.count))가 주사위 수(\(trajectory.dieCount))와 다르다"]
+        guard trajectory.restUpFaces.count == trajectory.dieCount else {
+            return ["정지 윗면 개수(\(trajectory.restUpFaces.count))가 주사위 수(\(trajectory.dieCount))와 다르다"]
         }
 
         // ① 트레이 이탈
@@ -2785,14 +2874,19 @@ public enum TrajectoryValidator {
             }
         }
 
-        // ② 마지막 프레임이 기록된 정지 자세와 일치하는가
+        // ② 정지 시 윗면 기울기가 2° 이내인가, 그리고 기록된 윗면 값과 일치하는가
+        //
+        // 24개 축정렬 자세와의 거리로 재면 안 된다. 바닥에 평평하게 누운 주사위도
+        // 수직축 둘레 yaw가 자유로워서 최대 45°가 나온다 (스펙 §7.3, Task 2 스파이크 실측).
         let last = trajectory.frames[trajectory.frameCount - 1]
         for die in 0..<trajectory.dieCount {
-            let recorded = trajectory.restOrientation(die: die)
-            let actual = last[die].orientation
-            let error = OctahedralGroup.angle(between: recorded, and: actual)
-            if error > 2.0 * .pi / 180 {
-                problems.append("주사위 \(die)의 마지막 프레임이 기록된 정지 자세와 \(error * 180 / .pi)도 어긋난다")
+            let tilt = DieFace.upFaceTiltRadians(for: last[die].orientation)
+            if tilt > 2.0 * .pi / 180 {
+                problems.append("주사위 \(die)가 \(tilt * 180 / .pi)도 기울어 멈췄다 (벽에 기댔을 가능성)")
+            }
+            let actualUpFace = DieFace.upValue(for: last[die].orientation)
+            if actualUpFace != trajectory.restUpFace(die: die) {
+                problems.append("주사위 \(die)의 기록된 윗면 \(trajectory.restUpFace(die: die))이 실제 \(actualUpFace)과 다르다")
             }
         }
 
@@ -2801,7 +2895,7 @@ public enum TrajectoryValidator {
             for value in 1...6 {
                 for yaw in 0..<4 {
                     let offset = FaceControl.offset(
-                        restOrientation: trajectory.restOrientation(die: die),
+                        restUpFace: trajectory.restUpFace(die: die),
                         showing: value, yawChoice: yaw
                     )
                     let pose = trajectory.posed(die: die, frame: trajectory.frameCount - 1, offset: offset)
@@ -2832,9 +2926,12 @@ git add Packages/DiceTrajectory
 git commit -m "$(cat <<'MSG'
 feat(trajectory): 궤적 자료구조, 바이너리 포맷, 검증기
 
-정지 자세를 쿼터니언이 아니라 24개 대칭군의 인덱스로 저장한다. 부동소수점으로
-저장하면 양자화 왕복에서 미세하게 어긋나고, 그러면 회전 오프셋이 대칭군을
-벗어나 스펙 7.3의 정확성 논증이 무너진다. 인덱스는 손실이 없다.
+정지 자세를 통째로 저장하지 않고 정지 시 위를 향한 눈만 1바이트로 저장한다.
+회전 오프셋이 그 값에만 의존하고, 정지 자세 자체는 마지막 프레임 쿼터니언이 이미
+갖고 있다. 정수라 양자화 손실도 없다.
+
+검증기 ②를 "24개 축정렬 최근접 2도"가 아니라 "윗면 기울기 2도"로 잰다. 바닥에
+평평하게 누운 주사위는 yaw가 자유로워서 전자로 재면 최대 45도가 나온다.
 
 프레임 데이터는 위치 Float16, 쿼터니언 Int16으로 양자화해 주사위 하나당
 14바이트다. 5개 120프레임이 8.4KB라 수백 개를 구워도 앱 번들에 여유롭게 들어간다.
@@ -2851,7 +2948,14 @@ MSG
 
 ### Task 12: 베이커 툴 — 궤적 굽기
 
-Task 2 스파이크에서 채택한 경로에 따라 구현한다. 이 문서는 **경로 A(RealityKit 베이커)** 를 기준으로 쓴다. 경로 B(자체 강체 시뮬)를 채택했다면 Step 3의 물리 스텝만 자체 구현으로 바꾸고 나머지 구조는 그대로 쓴다.
+Task 2 스파이크가 **경로 A'** 를 채택했다. RealityKit 베이커로 가되 정지 판정은 위치 차분으로 하고 기울어 멈춘 궤적은 기각한다. 스파이크가 실측으로 밝힌 네 가지를 반드시 반영한다:
+
+1. **관성 텐서를 형상에서 계산해야 한다.** `PhysicsBodyComponent(massProperties: .init(mass: 0.005), ...)`는 관성을 RealityKit 기본값 `0.1`로 남기는데, 16mm·5g 정육면체의 실제값 `m·a²/6 = 2.13e-7`의 약 47만 배다. 주사위가 영원히 돌고 절대 멈추지 않는다. **`PhysicsBodyComponent(shapes:mass:material:mode:)`를 써야 한다.**
+2. **`PhysicsMotionComponent`의 속도로 정지를 판정할 수 없다.** 값을 읽을 수는 있지만 물체가 잠든 뒤에도 유령 값이 남는다(자세 변화 0.00000°/프레임인 주사위가 4.73 rad/s를 보고). **위치·자세 차분으로 판정한다.**
+3. **트레이와 주사위가 같은 `PhysicsSimulationComponent` 루트 아래 있어야** 서로 충돌한다.
+4. **정착 시간이 0.9~5.0초로 들쭉날쭉하다.** 5초짜리 굴림은 게임 템포를 망치므로 프레임 상한을 두고 초과분은 기각한다.
+
+경로 B(자체 강체 시뮬)로 되돌아가야 할 상황이면 Step 3의 물리 스텝만 자체 구현으로 바꾸고 나머지 구조는 그대로 쓴다.
 
 **Files:**
 - Create: `Packages/DiceTrajectory/Sources/DiceTrajectory/TrayGeometry.swift`
@@ -2899,10 +3003,14 @@ struct BakePlan {
     /// 굴리는 개수별 x 방향별 변형 수. 5 x 3 x 40 = 600개.
     static let variantsPerCombination = 40
     static let frameRate = 60
-    static let maxFrames = 240          // 4초 안에 멈추지 않으면 버린다
-    static let settleThreshold: Float = 0.002   // m/frame
+    /// 정착 상한. 스파이크 실측 정착 시간이 0.9~5.0초인데 5초짜리 굴림은 게임 템포를 망친다.
+    /// 조합별 채택 수가 20개 미만이면 180으로 완화한다 (Step 6 판정표).
+    static let maxFrames = 150          // 2.5초
+    static let settleThreshold: Float = 0.002   // m/frame, 위치 차분 기준
     static let settleFrames = 20
-    static let maxSnapErrorDegrees: Float = 2.0
+    /// 정지 시 윗면 기울기 상한. 초과하면 벽에 기대어 멈춘 것이므로 기각한다.
+    /// 24개 축정렬 최근접 거리가 아니라 윗면 기울기로 잰다 (스펙 §7.3).
+    static let maxUpFaceTiltDegrees: Float = 2.0
 
     static var combinations: [(dieCount: Int, direction: ThrowDirection)] {
         (1...5).flatMap { count in ThrowDirection.allCases.map { (count, $0) } }
@@ -2950,6 +3058,8 @@ final class BakerModel {
     /// 트레이와 주사위를 만든다. 치수는 TrayGeometry에서만 가져온다.
     func makeScene() -> Entity {
         root = Entity()
+        // 트레이와 주사위가 같은 시뮬레이션 루트 아래 있어야 서로 충돌한다 (스파이크 실측)
+        root.components.set(PhysicsSimulationComponent())
         let t = TrayGeometry.wallThickness
         let inner = TrayGeometry.trayInner
         let walls: [(size: SIMD3<Float>, offset: SIMD3<Float>)] = [
@@ -2965,9 +3075,10 @@ final class BakerModel {
                 materials: [SimpleMaterial(color: .brown, isMetallic: false)]
             )
             entity.position = wall.offset
-            entity.components.set(CollisionComponent(shapes: [.generateBox(size: wall.size)]))
+            let shape = ShapeResource.generateBox(size: wall.size)
+            entity.components.set(CollisionComponent(shapes: [shape]))
             entity.components.set(PhysicsBodyComponent(
-                massProperties: .default,
+                shapes: [shape], mass: 0,
                 material: .generate(friction: 0.65, restitution: 0.20),
                 mode: .static))
             root.addChild(entity)
@@ -2979,9 +3090,12 @@ final class BakerModel {
                 mesh: .generateBox(size: size, cornerRadius: size * 0.10),
                 materials: [SimpleMaterial(color: .white, isMetallic: false)])
             entity.name = "die\(index)"
-            entity.components.set(CollisionComponent(shapes: [.generateBox(size: .init(repeating: size))]))
+            let shape = ShapeResource.generateBox(size: .init(repeating: size))
+            entity.components.set(CollisionComponent(shapes: [shape]))
+            // massProperties: .init(mass:)를 쓰면 관성이 기본값 0.1로 남아 실제값의 약 47만 배가
+            // 되고 주사위가 영원히 돈다. 반드시 형상에서 계산되는 이 생성자를 쓴다 (스파이크 실측).
             entity.components.set(PhysicsBodyComponent(
-                massProperties: .init(mass: 0.005),
+                shapes: [shape], mass: 0.005,
                 material: .generate(friction: 0.55, restitution: 0.30),
                 mode: .dynamic))
             entity.components.set(PhysicsMotionComponent())
@@ -3012,6 +3126,8 @@ final class BakerModel {
                 let orientation = entity.orientation(relativeTo: nil)
                 poses.append(DiePose(position: position, orientation: simd_normalize(orientation)))
 
+                // PhysicsMotionComponent의 속도는 잠든 뒤 유령 값이 남아 쓸 수 없다 (스파이크 실측).
+                // 위치 차분으로 판정한다.
                 let speed = frames.isEmpty ? .infinity
                     : simd_length(position - frames[frames.count - 1][die].position) * Float(BakePlan.frameRate)
                 maxSpeed = max(maxSpeed, speed)
@@ -3030,24 +3146,26 @@ final class BakerModel {
             if stillCount >= BakePlan.settleFrames { break }
         }
 
-        guard stillCount >= BakePlan.settleFrames else { return .failure("멈추지 않음") }
+        guard stillCount >= BakePlan.settleFrames else {
+            return .failure("\(BakePlan.maxFrames)프레임 안에 멈추지 않음")
+        }
 
-        // 정지 자세를 축정렬로 스냅한다. 이 스냅이 스펙 §7.3 논증의 전제다.
-        var restIndices: [UInt8] = []
+        // 정지 자세는 물리가 만든 그대로 둔다. 축정렬로 스냅하면 안 된다 —
+        // 바닥에 누운 주사위는 yaw가 연속적으로 자유로워서 최대 45° 홱 돌아간다 (스펙 §7.3).
+        // 기록하는 것은 "위를 향한 눈"뿐이고, 회전 오프셋은 그 값에만 의존한다.
+        var restUpFaces: [UInt8] = []
         for die in 0..<dieCount {
-            let snapped = OctahedralGroup.snap(frames[frames.count - 1][die].orientation)
-            let degrees = snapped.errorRadians * 180 / .pi
-            guard degrees <= BakePlan.maxSnapErrorDegrees else {
-                return .failure("주사위가 기울어 멈춤 (\(String(format: "%.1f", degrees))도)")
+            let resting = frames[frames.count - 1][die].orientation
+            let tiltDegrees = DieFace.upFaceTiltRadians(for: resting) * 180 / .pi
+            guard tiltDegrees <= BakePlan.maxUpFaceTiltDegrees else {
+                return .failure("주사위가 기울어 멈춤 (\(String(format: "%.1f", tiltDegrees))도, 벽에 기댄 듯)")
             }
-            restIndices.append(UInt8(snapped.index))
-            // 마지막 프레임을 스냅된 자세로 덮어써서 재생 끝이 정확히 축정렬이 되게 한다
-            frames[frames.count - 1][die].orientation = snapped.orientation
+            restUpFaces.append(UInt8(DieFace.upValue(for: resting)))
         }
 
         let trajectory = Trajectory(
             id: id, dieCount: dieCount, direction: direction, frameRate: BakePlan.frameRate,
-            frames: frames, restOrientationIndices: restIndices, collisions: collisions)
+            frames: frames, restUpFaces: restUpFaces, collisions: collisions)
 
         let problems = TrajectoryValidator.problems(
             in: trajectory, trayInner: TrayGeometry.trayInner, dieSize: TrayGeometry.dieSize)
@@ -3184,7 +3302,9 @@ Xcode에서 `TrajectoryBaker`를 Run하고 "굽기 시작"을 누른다. 약 25�
 |---|---|
 | 조합별 채택 30개 이상 | 좋다. Step 7로 간다 |
 | 채택 10~30개, 기각 사유가 "주사위가 기울어 멈춤" | 반발계수를 0.20으로 낮추고 마찰을 0.7로 올린 뒤 재실행 |
-| 채택 10개 미만, 기각 사유가 "멈추지 않음" | `settleThreshold`를 0.004로 완화하고 `maxFrames`를 360으로 늘린다 |
+| 채택 10개 미만, 기각 사유가 "멈추지 않음" | `maxFrames`를 180(3초)으로 늘린다. 그래도 부족하면 `settleThreshold`를 0.004로 완화한다. **240 이상으로는 올리지 않는다** — 4초짜리 굴림은 게임 템포를 망친다 |
+| 주사위가 영원히 돌고 하나도 안 멈춤 | `PhysicsBodyComponent`를 `massProperties:` 생성자로 쓰고 있는 것이다. `shapes:mass:material:mode:`로 바꾼다 |
+| 주사위가 트레이를 통과해 지나감 | 트레이와 주사위가 같은 `PhysicsSimulationComponent` 루트 아래 있는지 확인한다 |
 | 기각 사유가 "트레이를 벗어났다" | 초기 `linearVelocity`를 절반으로 줄인다 |
 
 각 조합에 최소 20개는 있어야 한다. 20개 미만인 조합이 있으면 `variantsPerCombination`을 60으로 늘려 재실행한다.
@@ -3199,9 +3319,14 @@ git add -A
 git commit -m "$(cat <<'MSG'
 feat(baker): 궤적 베이커와 구운 데이터
 
-정지 자세를 축정렬로 스냅하고, 스냅 오차가 2도를 넘으면 궤적을 버린다.
-이 스냅이 스펙 7.3 논증의 전제다. 기울어 멈춘 주사위를 억지로 스냅하면
-회전 오프셋이 대칭군을 벗어나 재생 중 주사위가 벽을 뚫는다.
+정지 자세는 물리가 만든 그대로 두고 "위를 향한 눈"만 기록한다. 축정렬로 스냅하면
+바닥에 누운 주사위의 자유로운 yaw까지 되돌려 최대 45도 홱 돌아간다.
+윗면 기울기가 2도를 넘으면 벽에 기대어 멈춘 것이므로 궤적을 버린다.
+
+스파이크가 실측으로 밝힌 두 가지를 반영했다. 관성 텐서는 형상에서 계산되는
+생성자를 써야 하고(massProperties 쪽은 기본값 0.1을 남겨 실제값의 47만 배가 된다),
+정지 판정은 PhysicsMotionComponent 속도가 아니라 위치 차분으로 해야 한다
+(잠든 뒤에도 유령 속도가 남는다).
 
 채택 전에 TrajectoryValidator를 통과시킨다. 굽는 단계에서 걸러내면 런타임에
 검사할 필요가 없다.
@@ -3802,7 +3927,7 @@ final class DiceStage {
         // 굴리는 각 주사위에 대해 오프셋을 미리 계산한다
         let offsets = (0..<slots.count).map { lane in
             FaceControl.offset(
-                restOrientation: trajectory.restOrientation(die: lane),
+                restUpFace: trajectory.restUpFace(die: lane),
                 showing: values[lane],
                 yawChoice: Int.random(in: 0..<4, using: &generator))
         }
@@ -3835,7 +3960,7 @@ final class DiceStage {
             let x = (Float(order) - Float(heldSlots.count - 1) / 2) * spacing
             dice[slot].position = [x, TrayGeometry.shelfHeight, -TrayGeometry.trayInner.z / 2 - 0.02]
             // 선반 위에서는 눈이 정면에서 잘 보이도록 축정렬 자세를 유지한다
-            if let target = OctahedralGroup.orientations(showing: values[slot]).first {
+            if let target = OctahedralGroup.elements.first(where: { DieFace.upValue(for: $0) == values[slot] }) {
                 dice[slot].orientation = target
             }
         }
@@ -3865,7 +3990,7 @@ final class DiceStage {
                                    generator: inout some RandomNumberGenerator) {
         for (lane, slot) in slots.enumerated() {
             guard dice.indices.contains(slot) else { continue }
-            let candidates = OctahedralGroup.orientations(showing: values[lane])
+            let candidates = OctahedralGroup.elements.filter { DieFace.upValue(for: $0) == values[lane] }
             dice[slot].orientation = candidates[Int.random(in: 0..<candidates.count, using: &generator)]
             dice[slot].position = [Float(slot - 2) * TrayGeometry.dieSize * 1.6, TrayGeometry.dieSize / 2, 0]
         }
