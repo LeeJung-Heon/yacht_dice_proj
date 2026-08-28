@@ -76,8 +76,11 @@ struct ScoreboardView: View {
         }
         .font(.caption)
         .padding(.vertical, 4)
-        .accessibilityIdentifier("scoreboard.subtotal")
+        // .accessibilityElement(children: .combine)이 먼저 와야 한다. 뒤에 두면 식별자가
+        // 자식들에게 먼저 붙고, 합쳐진 요소의 식별자는 "scoreboard.subtotal-scoreboard.subtotal"이
+        // 된다 — VoiceOver로 이 행을 지목할 수 없다.
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("scoreboard.subtotal")
         .accessibilityLabel(card.upperBonus > 0
             ? "상단 소계 \(card.upperSubtotal)점, 보너스 35점 획득"
             : "상단 소계 \(card.upperSubtotal)점, 보너스까지 \(ScoreCard.upperBonusThreshold - card.upperSubtotal)점 남음")
@@ -90,8 +93,8 @@ struct ScoreboardView: View {
             Text("\(card.total)").fontWeight(.bold).monospacedDigit()
         }
         .padding(.vertical, 6)
-        .accessibilityIdentifier("scoreboard.total")
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("scoreboard.total")
         .accessibilityLabel("총점 \(card.total)점")
     }
 }
