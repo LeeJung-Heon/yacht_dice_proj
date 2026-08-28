@@ -25,6 +25,10 @@ targets:
     sources: [App]
     info:
       path: App/Info.plist
+      properties:
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
     dependencies:
       - package: YachtCore
       - package: DiceTrajectory
