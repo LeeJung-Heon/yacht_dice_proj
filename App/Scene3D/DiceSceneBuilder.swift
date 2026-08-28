@@ -43,6 +43,11 @@ enum DiceSceneBuilder {
 
     // MARK: - 구성 요소
 
+    /// 아직 굴리기 전 다섯 개가 놓이는 자리. DiceStage.reset()도 같은 배치를 쓴다.
+    static func restingPosition(slot: Int) -> SIMD3<Float> {
+        [Float(slot - 2) * TrayGeometry.dieSize * 1.6, TrayGeometry.dieSize / 2, 0]
+    }
+
     private static func makeTable() -> Entity {
         var material = PhysicallyBasedMaterial()
         material.baseColor = .init(tint: .init(red: 0.45, green: 0.29, blue: 0.16, alpha: 1))
@@ -88,7 +93,17 @@ enum DiceSceneBuilder {
         return tray
     }
 
-    private static func makeDice() -> [ModelEntity] {
+    /// 주사위 하나의 메시. 면을 6개 파트로 쪼개서 파트마다 다른 눈 텍스처를 붙일 수 있게 한다.
+    /// `splitFaces: false`로는 텍스처 한 장이 6면 전부에 그대로 매핑돼 눈을 구분할 수 없다.
+    static func makeDieMesh() -> MeshResource {
+        let size = TrayGeometry.dieSize
+        return .generateBox(width: size, height: size, depth: size,
+                            cornerRadius: size * 0.10, splitFaces: true)
+    }
+
+    /// 머티리얼 인덱스 순서대로 6장. 텍스처를 못 만들면 눈 없는 흰 주사위 하나를 돌려준다 —
+    /// 게임이 시작조차 못 하는 것보다는 낫다.
+    static func makeDieMaterials() -> [PhysicallyBasedMaterial] {
         var ceramic = PhysicallyBasedMaterial()
         ceramic.baseColor = .init(tint: .init(red: 0.97, green: 0.96, blue: 0.93, alpha: 1))
         ceramic.roughness = .init(floatLiteral: 0.35)
@@ -96,18 +111,23 @@ enum DiceSceneBuilder {
         ceramic.clearcoat = .init(floatLiteral: 0.4)
         ceramic.clearcoatRoughness = .init(floatLiteral: 0.2)
 
-        if let atlas = DiePipTexture.makeAtlas(),
-           let texture = try? TextureResource(image: atlas, options: .init(semantic: .color)) {
-            ceramic.baseColor = .init(tint: .white, texture: .init(texture))
+        guard let faces = DiePipTexture.makeFaceTextures() else { return [ceramic] }
+        return faces.map { image in
+            var material = ceramic
+            if let texture = try? TextureResource(image: image, options: .init(semantic: .color)) {
+                material.baseColor = .init(tint: .white, texture: .init(texture))
+            }
+            return material
         }
+    }
 
+    private static func makeDice() -> [ModelEntity] {
+        let mesh = makeDieMesh()
+        let materials = makeDieMaterials()
         return (0..<5).map { index in
-            let size = TrayGeometry.dieSize
-            let entity = ModelEntity(
-                mesh: .generateBox(size: size, cornerRadius: size * 0.10),
-                materials: [ceramic])
+            let entity = ModelEntity(mesh: mesh, materials: materials)
             entity.name = "die\(index)"
-            entity.position = [Float(index - 2) * size * 1.6, size / 2, 0]
+            entity.position = restingPosition(slot: index)
             return entity
         }
     }
