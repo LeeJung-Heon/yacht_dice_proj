@@ -6,6 +6,7 @@ import DiceTrajectory
 
 /// 트레이·테이블·주사위 엔티티를 만든다.
 /// 물리 컴포넌트를 붙이지 않는다 — 재생은 키프레임 구동이고, 물리는 베이커에만 있다.
+@MainActor
 enum DiceSceneBuilder {
 
     static func makeRoot() -> Entity {
