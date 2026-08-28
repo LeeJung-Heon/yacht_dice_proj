@@ -69,6 +69,35 @@ public struct GameState: Equatable, Codable, Sendable {
         return next
     }
 
+    /// 부작용이 없다. 뷰가 버튼 활성화를 판단할 때 매 렌더마다 불러도 안전하다.
+    public func validate(_ intent: Intent) -> Result<Void, RuleError> {
+        guard phase != .finished else { return .failure(.gameFinished) }
+
+        switch intent {
+        case .roll:
+            guard rollsRemaining > 0 else { return .failure(.noRollsRemaining) }
+            guard !rollableIndices.isEmpty else { return .failure(.allDiceHeld) }
+            return .success(())
+
+        case .toggleHold(let index):
+            guard (0..<YachtCore.diceCount).contains(index) else { return .failure(.indexOutOfRange(index)) }
+            guard phase == .rolling else { return .failure(.mustRollFirst) }
+            return .success(())
+
+        case .commit(let category):
+            guard phase == .rolling else { return .failure(.mustRollFirst) }
+            guard !scorecards[currentPlayer].isFilled(category) else {
+                return .failure(.categoryAlreadyUsed(category))
+            }
+            return .success(())
+        }
+    }
+
+    public func allows(_ intent: Intent) -> Bool {
+        if case .success = validate(intent) { return true }
+        return false
+    }
+
     public static func replaying(_ events: [Event], playerCount: Int) -> GameState {
         events.reduce(GameState(playerCount: playerCount)) { $0.applying($1) }
     }
