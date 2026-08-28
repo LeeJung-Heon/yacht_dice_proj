@@ -1950,6 +1950,212 @@ MSG
 
 ---
 
+### Task 8b: 손상된 저장 파일 방어
+
+Task 8 리뷰가 실측으로 찾은 문제. **스펙 위반은 아니지만 출시 품질에 직결된다.**
+
+`applying(_:)`의 `precondition`들은 신뢰하는 호출자를 위한 불변식이라 위반 시 **트랩**을 낸다 (`throw`가 아니다). 그런데 저장 파일은 신뢰할 수 없는 입력이다. 구조는 멀쩡하지만 의미가 깨진 JSON — 예를 들어 `rolled` 배열 길이가 굴릴 수 있는 주사위 수와 다르거나 `playerCount`가 0인 경우 — 은 `decoded(from:)`을 통과한 뒤 `.state`를 처음 읽는 순간 프로세스를 죽인다 (리뷰어 실측: exit code 133).
+
+Task 18의 `MatchStore.load()`는 읽기 실패를 조용히 삼키고 새 판으로 시작하도록 설계돼 있지만, **트랩은 거기서 잡을 수 없다.** 앱이 실행 즉시 크래시 루프에 빠지고 사용자는 앱을 삭제하는 것 외에 복구할 방법이 없다.
+
+해법은 신뢰 경계에서 검사하는 것이다. `applying(_:)`의 precondition은 그대로 둔다 — 그것들은 신뢰하는 호출자에 대한 계약이고 리뷰에서 순수성이 검증됐다.
+
+**Files:**
+- Modify: `Packages/YachtCore/Sources/YachtCore/GameState.swift` (`canApply(_:)` 추가)
+- Modify: `Packages/YachtCore/Sources/YachtCore/MatchLog.swift` (디코딩 시 재생 가능성 검사)
+- Create: `Packages/YachtCore/Tests/YachtCoreTests/CorruptLogTests.swift`
+
+**Interfaces:**
+- Consumes: Task 5의 `GameState`/`Event`, Task 8의 `MatchLog`
+- Produces:
+  - `public func GameState.canApply(_ event: Event) -> Bool`
+  - `MatchLog.DecodingFailure`에 `.invalidPlayerCount(Int)`와 `.corruptedLog(eventIndex: Int)` 추가
+
+- [ ] **Step 1: 실패하는 테스트 작성**
+
+`Packages/YachtCore/Tests/YachtCoreTests/CorruptLogTests.swift`:
+
+```swift
+import Testing
+@testable import YachtCore
+
+@Suite("손상된 저장 파일")
+struct CorruptLogTests {
+
+    /// MatchLog를 거치지 않고 임의의 JSON을 만들어 손상된 파일을 흉내낸다.
+    private func encodedLog(playerCount: Int, events: [Event]) throws -> Data {
+        var log = MatchLog(playerCount: playerCount)
+        for event in events { log.append(event) }
+        return try log.encoded()
+    }
+
+    @Test("정상 로그는 그대로 디코딩된다")
+    func 정상_로그() throws {
+        let data = try encodedLog(playerCount: 1, events: [.rolled([1, 2, 3, 4, 5]), .committed(.choice, 15)])
+        let restored = try MatchLog.decoded(from: data)
+        #expect(restored.events.count == 2)
+        #expect(restored.state.scorecards[0].entry(.choice) == 15)
+    }
+
+    @Test("rolled 길이가 어긋난 로그는 트랩이 아니라 throw로 거부된다")
+    func 잘못된_rolled_길이() throws {
+        // 5개 슬롯이 비어 있는데 3개만 굴린 것으로 기록된 로그.
+        // 예전에는 이 데이터가 디코딩을 통과한 뒤 .state 접근 시 프로세스를 죽였다.
+        let data = try encodedLog(playerCount: 1, events: [.rolled([1, 2, 3])])
+        #expect(throws: MatchLog.DecodingFailure.corruptedLog(eventIndex: 0)) {
+            try MatchLog.decoded(from: data)
+        }
+    }
+
+    @Test("주사위 눈이 범위를 벗어난 로그를 거부한다")
+    func 잘못된_주사위_눈() throws {
+        let data = try encodedLog(playerCount: 1, events: [.rolled([1, 2, 3, 4, 9])])
+        #expect(throws: MatchLog.DecodingFailure.corruptedLog(eventIndex: 0)) {
+            try MatchLog.decoded(from: data)
+        }
+    }
+
+    @Test("같은 카테고리를 두 번 기록한 로그를 거부한다")
+    func 중복_기록() throws {
+        let data = try encodedLog(playerCount: 1, events: [
+            .rolled([1, 1, 1, 1, 1]), .committed(.aces, 5), .turnAdvanced,
+            .rolled([1, 1, 1, 1, 1]), .committed(.aces, 5),
+        ])
+        #expect(throws: MatchLog.DecodingFailure.corruptedLog(eventIndex: 4)) {
+            try MatchLog.decoded(from: data)
+        }
+    }
+
+    @Test("주사위 인덱스가 범위를 벗어난 로그를 거부한다")
+    func 잘못된_홀드_인덱스() throws {
+        let data = try encodedLog(playerCount: 1, events: [.rolled([1, 2, 3, 4, 5]), .holdToggled(7)])
+        #expect(throws: MatchLog.DecodingFailure.corruptedLog(eventIndex: 1)) {
+            try MatchLog.decoded(from: data)
+        }
+    }
+
+    @Test("playerCount가 0인 로그를 거부한다")
+    func 잘못된_플레이어_수() throws {
+        // MatchLog(playerCount: 0)은 그 자체로는 막히지 않지만 GameState는 1명 이상을 요구한다.
+        let data = try encodedLog(playerCount: 0, events: [])
+        #expect(throws: MatchLog.DecodingFailure.invalidPlayerCount(0)) {
+            try MatchLog.decoded(from: data)
+        }
+    }
+
+    @Test("canApply는 상태를 바꾸지 않는다")
+    func 부작용_없음() {
+        let state = GameState(playerCount: 1).applying(.rolled([1, 2, 3, 4, 5]))
+        let before = state
+        _ = state.canApply(.rolled([1, 2]))
+        _ = state.canApply(.holdToggled(99))
+        _ = state.canApply(.committed(.aces, 1))
+        #expect(state == before)
+    }
+}
+```
+
+- [ ] **Step 2: 테스트가 실패하는지 확인**
+
+```bash
+swift test --package-path "Packages/YachtCore"
+```
+Expected: 컴파일 실패 — `canApply` / `corruptedLog` / `invalidPlayerCount` 가 없다.
+
+- [ ] **Step 3: `GameState.canApply(_:)` 추가**
+
+`GameState.swift`의 `allows(_:)` 바로 아래에 삽입:
+
+```swift
+    /// 신뢰할 수 없는 출처(저장 파일, 나중에는 네트워크)에서 온 이벤트가 적용 가능한지 검사한다.
+    ///
+    /// `applying(_:)`의 precondition들은 신뢰하는 호출자를 위한 불변식이라 위반하면 트랩을 낸다.
+    /// 트랩은 잡을 수 없으므로, 손상된 저장 파일이 앱을 실행 즉시 죽이는 것을 막으려면
+    /// 신뢰 경계에서 먼저 이 검사를 통과시켜야 한다. 부작용은 없다.
+    public func canApply(_ event: Event) -> Bool {
+        switch event {
+        case .rolled(let values):
+            return values.count == rollableIndices.count
+                && values.allSatisfy { (1...6).contains($0) }
+        case .holdToggled(let index):
+            return (0..<YachtCore.diceCount).contains(index)
+        case .committed(let category, _):
+            return !scorecards[currentPlayer].isFilled(category)
+        case .turnAdvanced, .gameEnded:
+            return true
+        }
+    }
+```
+
+- [ ] **Step 4: `MatchLog.decoded(from:)`에 재생 가능성 검사 추가**
+
+`MatchLog.swift`의 `DecodingFailure`를 다음으로 교체:
+
+```swift
+    public enum DecodingFailure: Error, Equatable {
+        case unsupportedVersion(Int)
+        case invalidPlayerCount(Int)
+        case corruptedLog(eventIndex: Int)
+    }
+```
+
+`decoded(from:)`을 다음으로 교체:
+
+```swift
+    /// 저장 파일은 신뢰할 수 없는 입력이다. JSON 구조가 멀쩡해도 내용이 깨져 있을 수 있고,
+    /// 그런 로그를 그대로 돌려주면 나중에 state를 읽는 순간 프로세스가 죽는다.
+    /// 여기서 끝까지 재생해보고, 안 되면 던진다.
+    public static func decoded(from data: Data) throws -> MatchLog {
+        let log = try JSONDecoder().decode(MatchLog.self, from: data)
+        guard log.formatVersion == Self.formatVersion else {
+            throw DecodingFailure.unsupportedVersion(log.formatVersion)
+        }
+        guard log.playerCount >= 1 else {
+            throw DecodingFailure.invalidPlayerCount(log.playerCount)
+        }
+
+        var state = GameState(playerCount: log.playerCount)
+        for (index, event) in log.events.enumerated() {
+            guard state.canApply(event) else {
+                throw DecodingFailure.corruptedLog(eventIndex: index)
+            }
+            state = state.applying(event)
+        }
+        return log
+    }
+```
+
+- [ ] **Step 5: 테스트 통과 확인**
+
+```bash
+swift test --package-path "Packages/YachtCore"
+```
+Expected: PASS (54 tests). 기존 47개가 전부 그대로 통과해야 한다.
+
+- [ ] **Step 6: 커밋**
+
+```bash
+git add Packages/YachtCore
+git commit -m "$(cat <<'MSG'
+fix(core): 손상된 저장 파일이 앱을 죽이지 않게 한다
+
+applying()의 precondition은 신뢰하는 호출자를 위한 불변식이라 위반하면 트랩을
+낸다. throw가 아니라서 잡을 수 없다. 그런데 저장 파일은 신뢰할 수 없는 입력이다.
+
+구조는 멀쩡하지만 내용이 깨진 JSON은 디코딩을 통과한 뒤 state를 처음 읽는 순간
+프로세스를 죽인다. 저장 파일을 앱 실행 시점에 읽으므로 크래시 루프가 되고,
+사용자는 앱을 삭제하는 것 말고 복구할 방법이 없다.
+
+precondition은 그대로 뒀다. 대신 신뢰 경계인 decoded(from:)에서 로그를 끝까지
+재생해보고 안 되면 던진다.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+MSG
+)"
+```
+
+---
+
 ### Task 9: 주사위 면 정의와 정육면체 회전 대칭군
 
 **이 프로젝트에서 가장 중요한 작업이다.** 스펙 §7.3의 정확성 논증이 여기 구현 위에 서 있다. `Δ = q_rest⁻¹ · q_target`가 정육면체 대칭군의 원소여야 궤적의 기하가 원본과 동일하게 유지된다.
