@@ -6,3 +6,5 @@ xcuserdata/
 .swiftpm/
 *.xcodeproj
 .build/
+
+.build-baker/
