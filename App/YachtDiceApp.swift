@@ -31,12 +31,29 @@ final class AppContainer {
     }
 
     private(set) var status: Status = .loading
+    private let store = MatchStore.default
 
     init() {
         do {
             let stage = DiceStage(library: try TrajectoryLibrary.bundled())
+            let restored = (try? store.load()) ?? nil
             let session = GameSession(driver: LocalDriver(), stage: stage,
-                                      log: MatchLog(playerCount: 1))
+                                      log: restored ?? MatchLog(playerCount: 1))
+
+            // 복원한 판이면 주사위를 마지막 상태로 앉힌다
+            if let restored, restored.state.phase == .rolling {
+                let state = restored.state
+                Task { @MainActor in
+                    _ = await stage.roll(values: state.dice, slots: Array(0..<YachtCore.diceCount),
+                                         direction: .center, skipAnimation: true)
+                    stage.placeHeld(state.held.sorted(), values: state.dice)
+                }
+            }
+
+            let store = store
+            session.onLogChanged = { log in
+                try? store.save(log)
+            }
             status = .ready(session, stage)
         } catch {
             status = .failed("주사위 데이터를 읽지 못했습니다: \(error)")
