@@ -2599,19 +2599,37 @@ struct FaceControlTests {
         #expect(OctahedralGroup.preservesCube(delta, tolerance: 1e-4))
     }
 
-    @Test("왼쪽 곱셈은 틀린 답을 낸다 — 곱하는 방향이 중요하다")
+    @Test("왼쪽 곱셈은 다른 연산이다 — 곱하는 방향이 중요하다")
     func 곱셈_방향() {
         // 회귀 방지용. 누군가 simd_mul의 인자 순서를 뒤집으면 여기서 잡힌다.
-        // 정지 자세에 yaw를 섞어 두 방향이 우연히 일치하지 않게 한다.
-        let yaw = simd_quatf(angle: 40 * .pi / 180, axis: SIMD3<Float>(0, 1, 0))
-        let resting = simd_normalize(simd_mul(yaw, OctahedralGroup.elements[0]))
-        let upFace = DieFace.upValue(for: resting)
-        let target = (upFace % 6) + 1                       // 현재 윗면과 다른 눈
-        let delta = FaceControl.offset(restUpFace: upFace, showing: target, yawChoice: 0)
+        //
+        // 케이스를 하나만 고르면 안 된다. 좌우 곱셈이 우연히 같은 면을 올리는 조합이
+        // 존재하기 때문이다 (예: 정지 자세가 Y축 yaw뿐이면 둘이 자주 일치한다).
+        // 전체를 훑어 "오른쪽은 전부 맞고, 왼쪽은 전부 맞지는 않는다"를 확인한다.
+        var rightCorrect = 0
+        var leftCorrect = 0
+        var total = 0
 
-        #expect(DieFace.upValue(for: simd_mul(resting, delta)) == target, "오른쪽 곱셈이 틀렸다")
-        #expect(DieFace.upValue(for: simd_mul(delta, resting)) != target,
-                "왼쪽 곱셈이 우연히 맞았다 — 더 어려운 케이스를 골라야 한다")
+        for yawDegrees in stride(from: Float(0), to: 360, by: 23) {
+            let yaw = simd_quatf(angle: yawDegrees * .pi / 180, axis: SIMD3<Float>(0, 1, 0))
+            for base in OctahedralGroup.elements {
+                let resting = simd_normalize(simd_mul(yaw, base))
+                let upFace = DieFace.upValue(for: resting)
+                for target in 1...6 {
+                    for yawChoice in 0..<4 {
+                        let delta = FaceControl.offset(
+                            restUpFace: upFace, showing: target, yawChoice: yawChoice)
+                        total += 1
+                        if DieFace.upValue(for: simd_mul(resting, delta)) == target { rightCorrect += 1 }
+                        if DieFace.upValue(for: simd_mul(delta, resting)) == target { leftCorrect += 1 }
+                    }
+                }
+            }
+        }
+
+        #expect(rightCorrect == total, "오른쪽 곱셈이 \(total - rightCorrect)건 틀렸다")
+        #expect(leftCorrect < total,
+                "왼쪽 곱셈도 전부 맞았다 — 이 테스트가 곱셈 방향을 구분하지 못한다는 뜻이다")
     }
 }
 ```
