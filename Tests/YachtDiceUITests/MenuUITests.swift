@@ -77,3 +77,17 @@ final class MenuUITests: XCTestCase {
         XCTAssertTrue(app.buttons["menu.resume"].waitForExistence(timeout: 5), "이어하기가 없다")
     }
 }
+
+extension MenuUITests {
+    @MainActor
+    func test_온라인_대전_화면이_열린다() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetMatch"]
+        app.launch()
+        let online = app.buttons["menu.online"]
+        XCTAssertTrue(online.waitForExistence(timeout: 10))
+        online.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["online.status"].waitForExistence(timeout: 10),
+                      "온라인 상태 문구가 없다")
+    }
+}
