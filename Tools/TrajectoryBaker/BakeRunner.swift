@@ -5,7 +5,15 @@ import DiceTrajectory
 struct BakePlan {
     /// 굴리는 개수별 x 방향별 시도 수. 5 x 3 x 80 = 1200회 시도. 5개짜리는 하나라도 선반에
     /// 올라앉으면 기각이라 채택률이 낮다. 조합당 최소 20개(TrajectoryLibraryTests)를 채우려면 이만큼 필요하다.
-    static let variantsPerCombination = 80
+    static var variantsPerCombination: Int {
+        // `-variants 30`처럼 주면 그만큼만. 던지기 파라미터를 맞출 때 짧게 돌려 보는 용도다.
+        if let index = CommandLine.arguments.firstIndex(of: "-variants"),
+           index + 1 < CommandLine.arguments.count,
+           let count = Int(CommandLine.arguments[index + 1]), count > 0 {
+            return count
+        }
+        return 80
+    }
     static let frameRate = 60
     /// 정착 상한. 스파이크 실측 정착 시간이 0.9~5.0초인데 5초짜리 굴림은 게임 템포를 망친다.
     /// 조합별 채택 수가 20개 미만이면 180으로 완화한다 (Step 6 판정표).

@@ -64,7 +64,7 @@ final class BakerModel {
             // 되고 주사위가 영원히 돈다. 반드시 형상에서 계산되는 이 생성자를 쓴다 (스파이크 실측).
             entity.components.set(PhysicsBodyComponent(
                 shapes: [shape], mass: 0.005,
-                material: .generate(friction: 0.45, restitution: 0.32),
+                material: .generate(friction: 0.6, restitution: 0.30),
                 mode: .dynamic))
             entity.components.set(PhysicsMotionComponent())
             root.addChild(entity)
@@ -216,9 +216,9 @@ final class BakerModel {
             // 뒷벽까지 날아가 보이는 벽 위에서 부딪히고(기각), 벽에 맞자마자 멈춰 너무 짧아진다(기각).
             // 구르는 시간은 회전이 만든다.
             motion.linearVelocity = [
-                lateral * 0.6 + .random(in: -0.12...0.12),
-                .random(in: 0.08...0.32),
-                -.random(in: 0.5...0.85),
+                lateral * 0.5 + .random(in: -0.12...0.12),
+                .random(in: 0.08...0.30),
+                -.random(in: 0.25...0.55),
             ]
             motion.angularVelocity = SIMD3(.random(in: -45...45), .random(in: -45...45), .random(in: -45...45))
             entity.components.set(motion)
