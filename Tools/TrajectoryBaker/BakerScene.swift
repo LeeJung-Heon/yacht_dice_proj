@@ -62,10 +62,14 @@ final class BakerModel {
             entity.components.set(CollisionComponent(shapes: [shape]))
             // massProperties: .init(mass:)를 쓰면 관성이 기본값 0.1로 남아 실제값의 약 47만 배가
             // 되고 주사위가 영원히 돈다. 반드시 형상에서 계산되는 이 생성자를 쓴다 (스파이크 실측).
-            entity.components.set(PhysicsBodyComponent(
+            var body = PhysicsBodyComponent(
                 shapes: [shape], mass: 0.005,
                 material: .generate(friction: 0.6, restitution: 0.30),
-                mode: .dynamic))
+                mode: .dynamic)
+            // 물리 엔진에는 비틀림 마찰이 없다. 바닥에 평평하게 놓인 주사위의 수직축 회전이 안 죽어서
+            // 팽이처럼 제자리에서 돌았다(실측: 29%가 마지막 0.4초에 60도 이상). 각감쇠로 대신한다.
+            body.angularDamping = 3.0
+            entity.components.set(body)
             entity.components.set(PhysicsMotionComponent())
             root.addChild(entity)
             return entity
@@ -207,9 +211,12 @@ final class BakerModel {
                 Self.throwHeight + .random(in: 0...0.012),
                 TrayGeometry.trayInner.z / 2 - 0.03 + .random(in: -0.008...0.008),
             ]
-            entity.orientation = simd_normalize(simd_quatf(
-                angle: .random(in: 0...(2 * .pi)),
-                axis: simd_normalize(SIMD3<Float>.random(in: -1...1))))
+            // 시작 자세는 축정렬에 가깝게. 손에서 놓는 주사위는 이미 어느 면이 위든 대략 반듯하다.
+            // 무작위 자세로 시작하면 앱의 리드인이 0.2초 동안 중앙값 100도를 제자리에서 돌려야 한다.
+            // 눈의 다양성은 회전 오프셋(4개)과 궤적 선택이 만든다 — 시작 자세가 만들 필요가 없다.
+            let yaw = simd_quatf(angle: Float(Int.random(in: 0..<4)) * .pi / 2, axis: [0, 1, 0])
+            let tilt = simd_quatf(angle: .random(in: -0.25...0.25), axis: simd_normalize(SIMD3<Float>(.random(in: -1...1), 0, .random(in: -1...1))))
+            entity.orientation = simd_normalize(tilt * yaw)
             var motion = PhysicsMotionComponent()
             // 뒤로(-z), 살짝 위로. 앞쪽 가장자리에서 0.045 높이로 던지면 약 0.16초 뒤 바닥에 닿으므로
             // 앞 속도 0.55~0.95면 첫 착지가 트레이 가운데(z ≈ 0)가 된다. 이보다 빠르면 공중에서
@@ -220,7 +227,10 @@ final class BakerModel {
                 .random(in: 0.08...0.30),
                 -.random(in: 0.25...0.55),
             ]
-            motion.angularVelocity = SIMD3(.random(in: -45...45), .random(in: -45...45), .random(in: -45...45))
+            // 회전은 진행 방향(-z)에 수직인 x축 둘레로 — 앞으로 구르는 회전이다. 수직축(y) 성분은 거의 없앤다:
+            // 바닥에 닿아도 잘 안 죽어서 주사위가 제자리에서 팽이처럼 도는 원인이었다(실측: 29%가 마지막 0.4초에 60도 이상).
+            let tumble: Float = .random(in: 22...42) * (Bool.random() ? 1 : -1)
+            motion.angularVelocity = SIMD3(tumble, .random(in: -4...4), .random(in: -12...12))
             entity.components.set(motion)
         }
     }
