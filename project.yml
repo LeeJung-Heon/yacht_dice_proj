@@ -19,6 +19,9 @@ packages:
     path: Packages/DiceTrajectory
   YachtBot:
     path: Packages/YachtBot
+  Supabase:
+    url: https://github.com/supabase/supabase-swift.git
+    exactVersion: 2.55.1
 
 targets:
   YachtDice:
@@ -50,6 +53,8 @@ targets:
       - package: YachtCore
       - package: DiceTrajectory
       - package: YachtBot
+      - package: Supabase
+        product: Supabase
 
   YachtDiceTests:
     type: bundle.unit-test

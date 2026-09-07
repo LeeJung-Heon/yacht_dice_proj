@@ -20,6 +20,7 @@ final class AppContainer {
     private let store: MatchStore
     private let stage: DiceStage?
     let gameCenter = GameCenterService()
+    let supabase = SupabaseService()
     /// 온라인 매치를 열지 못한 이유. 온라인 메뉴가 보여준다.
     private(set) var onlineError: String?
 
@@ -65,6 +66,23 @@ final class AppContainer {
         _ = openOnlineMatch(matchID: match.matchID, localID: gameCenter.localPlayerID, players: players,
                             matchData: match.matchData,
                             transport: GameCenterTurnTransport(match: match, service: gameCenter))
+    }
+
+    /// Supabase 행으로 게임을 연다. 게스트가 아직 없는 대기 방은 열지 않는다.
+    @discardableResult
+    func openSupabaseMatch(_ row: MatchRow) -> Bool {
+        guard let uid = supabase.uid else {
+            onlineError = "로그인되지 않았다"
+            return false
+        }
+        guard row.guestUid != nil else {
+            onlineError = "상대가 아직 들어오지 않았다"
+            return false
+        }
+        let data = try? row.log.encoded()
+        return openOnlineMatch(matchID: row.id.uuidString, localID: uid.uuidString,
+                               players: row.seats(localUid: uid), matchData: data,
+                               transport: SupabaseTurnTransport(client: supabase.client, matchID: row.id))
     }
 
     /// GameKit 객체 없이 테스트할 수 있는 핵심. 성공하면 참.
