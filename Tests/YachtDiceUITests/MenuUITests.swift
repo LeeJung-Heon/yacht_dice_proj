@@ -91,3 +91,17 @@ extension MenuUITests {
                       "온라인 상태 문구가 없다")
     }
 }
+
+extension MenuUITests {
+    @MainActor
+    func test_설정_시트가_열린다() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetMatch"]
+        app.launch()
+        let settings = app.buttons["menu.settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.tap()
+        XCTAssertTrue(app.switches["settings.sound"].waitForExistence(timeout: 5), "사운드 토글이 없다")
+        XCTAssertTrue(app.switches["settings.haptics"].exists, "햅틱 토글이 없다")
+    }
+}
