@@ -1,6 +1,6 @@
 # 요트 다이스 (Yacht Dice)
 
-닌텐도 『세계의 게임 대전 51』의 Yacht Dice를 레퍼런스로 삼은 iOS 네이티브 야추 다이스 게임으로, RealityKit 3D 주사위와 이벤트 소싱 규칙 엔진 위에 세로 화면 전용으로 만들었으며 혼자 연습, 컴퓨터 대전(3단계), 같은 기기 2~4인, Game Center 턴제 온라인 대전을 지원한다.
+닌텐도 『세계의 게임 대전 51』의 Yacht Dice를 레퍼런스로 삼은 iOS 네이티브 야추 다이스 게임으로, RealityKit 3D 주사위와 이벤트 소싱 규칙 엔진 위에 세로 화면 전용으로 만들었으며 혼자 연습, 컴퓨터 대전(3단계), 같은 기기 2~4인, Supabase 방 코드 온라인 대전을 지원한다.
 
 ## 빌드
 
@@ -43,7 +43,7 @@ SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
 | `App/Views` | 시작 메뉴, 참가자 띠, 점수판, 액션 바, 결과 카드 등 세로 화면 UI. |
 | `App/Design` | 라이트/다크 테마 토큰과 대비 검사, 종이·가죽·나무 표면, 주사위 면 뷰, 메뉴 카드. |
 | `App/Feedback` | 햅틱 매핑, 외부 파일 없는 합성 효과음, 세션 콜백을 잇는 `FeedbackCoordinator`, 설정 키. |
-| `App/Online` | `TurnTransport` 프로토콜, 테스트용 메모리 전송, Game Center 어댑터, 매치메이커로, GameKit은 여기서만 import한다. |
+| `App/Online` | `TurnTransport` 프로토콜, 테스트용 메모리 전송, Supabase 서비스·전송·행 모델, 그리고 보류 중인 Game Center 어댑터로, Supabase SDK와 GameKit은 여기서만 import한다. |
 | `App/AppContainer.swift` | 앱 조립, 메뉴 상태, 저장된 판 복원, 온라인 매치 열기. |
 | `Tools/TrajectoryBaker` | 물리 시뮬로 궤적을 굽는 macOS 앱으로, 결과는 `App/Resources/trajectories.bin`에 들어간다. |
 | `docs/superpowers` | 설계 스펙과 구현 계획. |
@@ -60,20 +60,19 @@ SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
 
 가죽·호두나무·주사위 눈은 `App/Scene3D/ProceduralTexture.swift`의 결정적 노이즈로 앱 시작 시 그리므로 외부 텍스처와 모델 파일이 없으며, 트레이의 보이는 모양(모서리 라운드, 선반 패드)은 자유롭게 바꿔도 되지만 주사위가 닿는 면의 위치(`TrayGeometry`)는 구운 궤적과 맞물려 있어 바꾸면 다시 구워야 한다.
 
-## 온라인 대전을 실기기에서 확인하려면
+## 온라인 대전
 
-매치 데이터는 `MatchLog` JSON 그대로이고 상대가 보낸 로그는 `GameState.canApply`로 검증한 뒤 재생하며, 주사위는 각 클라이언트가 굴리므로 조작된 클라이언트의 "운 좋은 눈"은 막지 못한다(스펙 P2/P3 §7.4). 자동화된 테스트는 메모리 전송으로 두 세션이 12턴을 완주하는 것, 조작 로그 거부, 매치 열기(새 매치·이어하기·상대 차례·손상 데이터·중복 열기)까지 다루고, Game Center 자체(인증, 매치메이커, 턴 이벤트 전달)는 실기기에서만 확인할 수 있다.
+온라인 대전은 Supabase 무료 티어(프로젝트 `yacht-dice`, 서울)로 동작하며, 기기마다 익명 로그인으로 계정 하나를 받고 6자리 방 코드로 상대와 만나며, 한 판은 `public.matches` 행 하나이고 매치 데이터는 `MatchLog` JSON 그대로다. 내 턴이 끝나면 행을 갱신하고 상대 턴은 Realtime으로 그 행의 UPDATE를 받아 `GameState.canApply`로 검증한 뒤 재생하므로, 규칙 위반은 막지만 주사위는 각 클라이언트가 굴려 조작된 클라이언트의 "운 좋은 눈"은 막지 못한다(스펙 P2/P3 §7.4). 서버 쪽 RLS는 참가자만 행을 읽고 갱신하게 하고, 방 입장은 `join_match` 함수가 대기 중인 빈 자리에만 넣으며, 좌석 교체는 트리거가 막는다.
 
-실제 매치는 Apple Developer 포털에서 앱 ID `com.leejungheon.yachtdice.YachtDice`에 Game Center 기능을 켜고, App Store Connect의 앱 레코드에서 Game Center를 활성화하고, 실기기 두 대(A·B)에 서로 다른 Apple ID(샌드박스 테스터 가능)로 Game Center에 로그인해야 동작하며, 그 뒤 다음 순서로 확인한다.
+검증은 세 층으로 되어 있는데, 메모리 전송으로 두 세션이 12턴을 완주하는 단위 테스트, `YACHT_SUPABASE_E2E=1`을 주면 실제 프로젝트에 익명 계정 둘로 방 만들기·입장·턴 왕복을 확인하는 통합 테스트(`SupabaseE2ETests`), 그리고 시뮬레이터 두 대가 화면에서 코드로 만나 턴을 주고받는 것까지 확인했다.
 
-1. A에서 메뉴 → 온라인 대전을 열어 상태가 "…으로 로그인됨"인지 보고, 아니면 설정 앱에서 Game Center에 로그인한다.
-2. A에서 새 매치 찾기로 자동 매칭하거나 B를 초대하면 게임 화면이 열리고 상대 명패에 "상대"(자동 매칭) 또는 B의 이름이 보여야 한다.
-3. A가 굴리고 기록하면 헤더가 "상대 차례"로 바뀌고 Roll이 잠겨야 한다.
-4. B가 알림을 탭하거나 온라인 대전의 진행 중인 매치에서 열면 A의 주사위 눈과 점수가 그대로 보이고 B의 차례가 열려야 한다.
-5. B가 한 턴을 두면 A의 화면에 B의 굴림이 3D로 재생되고 A의 차례가 열려야 한다.
-6. 앱을 완전히 종료한 뒤 다시 열어 진행 중인 매치를 열면 같은 상태여야 한다.
-7. 12턴을 끝내면 양쪽 결과 카드의 순위가 같고 Game Center 매치 목록에서 사라져야 한다.
-8. 기내 모드로 상대 턴을 기다리다 해제하면 턴 이벤트가 도착해야 한다.
+```sh
+TEST_RUNNER_YACHT_SUPABASE_E2E=1 xcodebuild -project YachtDice.xcodeproj -scheme YachtDice \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:YachtDiceTests/SupabaseE2ETests test
+```
+
+푸시 알림이 없어 상대가 앱을 열어 있어야 턴이 전달되고 익명 계정은 앱을 지우면 사라지므로 진행 중인 매치도 함께 잃으며, 서버 설정은 대시보드에서 Anonymous sign-ins를 켜 두어야 한다. Game Center 턴제 매치 코드(`GameCenterService`, `GameCenterTurnTransport`, `MatchmakerView`)는 유료 개발자 계정을 만든 뒤 쓰도록 `App/Online`에 남겨 두었고, 켜려면 Apple Developer 포털에서 앱 ID에 Game Center를 활성화하고 온라인 메뉴를 Game Center 버전으로 되돌리면 된다.
 
 ## 궤적 다시 굽기
 

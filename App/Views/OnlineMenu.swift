@@ -13,6 +13,9 @@ struct OnlineMenu: View {
     @State private var busy = false
     @State private var message: String?
     @State private var waitTask: Task<Void, Never>?
+    @FocusState private var focusedField: Field?
+
+    private enum Field { case nickname, code }
 
     private var service: SupabaseService { container.supabase }
     private var trimmedName: String { nickname.trimmingCharacters(in: .whitespaces) }
@@ -79,6 +82,8 @@ struct OnlineMenu: View {
         HStack {
             Text("닉네임").foregroundStyle(theme.inkSecondary)
             TextField("이름", text: $nickname)
+                .focused($focusedField, equals: .nickname)
+                .submitLabel(.done)
                 .textFieldStyle(.plain)
                 .foregroundStyle(theme.ink)
                 .multilineTextAlignment(.trailing)
@@ -109,6 +114,7 @@ struct OnlineMenu: View {
             Text("코드로 들어가기").font(.system(.headline, design: .serif)).foregroundStyle(theme.ink)
             HStack(spacing: 10) {
                 TextField("6자리 코드", text: $codeInput)
+                    .focused($focusedField, equals: .code)
                     .keyboardType(.numberPad)
                     .textFieldStyle(.plain)
                     .font(.system(.title3, design: .rounded).weight(.semibold))
@@ -182,6 +188,7 @@ struct OnlineMenu: View {
     // MARK: - 동작
 
     private func createRoom() async {
+        focusedField = nil
         busy = true
         defer { busy = false }
         message = nil
@@ -219,6 +226,7 @@ struct OnlineMenu: View {
     }
 
     private func joinRoom() async {
+        focusedField = nil
         busy = true
         defer { busy = false }
         message = nil
