@@ -27,3 +27,17 @@ struct DiceSceneBuilderTests {
             "광원 엔티티와 수신 엔티티(root)가 같으면 안 된다 — 그러면 광원이 자기 자신만 비추고 table/tray/dice는 아무것도 이 IBL을 받지 못한다")
     }
 }
+
+@Suite("씬 구성 - 비용")
+struct DiceSceneBuildCostTests {
+    /// 씬은 앱 시작 시 동기로 조립된다. 절차적 텍스처가 무거워지면 첫 화면이 늦게 뜬다.
+    /// Debug 빌드(최적화 없음) 기준 상한이라 Release에서는 훨씬 빠르다.
+    @Test("씬 조립이 2초 안에 끝난다 (Debug)")
+    @MainActor
+    func 조립_시간() {
+        let start = ContinuousClock.now
+        _ = DiceSceneBuilder.makeRoot()
+        let elapsed = ContinuousClock.now - start
+        #expect(elapsed < .seconds(2), "씬 조립에 \(elapsed) 걸렸다")
+    }
+}

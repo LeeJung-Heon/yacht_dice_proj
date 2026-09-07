@@ -1,11 +1,13 @@
 import Foundation
-import CoreGraphics
 import RealityKit
 import simd
 import DiceTrajectory
 
-/// 트레이·테이블·주사위 엔티티를 만든다.
+/// 트레이·테이블·주사위 엔티티를 조립한다. 재질은 `SceneMaterials`, 조명은 `SceneLighting`이 맡는다.
 /// 물리 컴포넌트를 붙이지 않는다 — 재생은 키프레임 구동이고, 물리는 베이커에만 있다.
+///
+/// 치수는 전부 `TrayGeometry`에서 온다. 눈에 보이는 모양(모서리 라운드, 선반 인레이)은
+/// 바꿔도 되지만, 주사위가 닿는 면의 위치는 구운 궤적과 맞물려 있으니 건드리면 안 된다.
 @MainActor
 enum DiceSceneBuilder {
 
@@ -15,7 +17,7 @@ enum DiceSceneBuilder {
         root.addChild(makeTray())
         for die in makeDice() { root.addChild(die) }
 
-        let lighting = makeLighting()
+        let lighting = SceneLighting.makeRig()
         root.addChild(lighting)
         // IBL은 광원 엔티티(ibl)에 붙이고, 수신은 비출 대상(table/tray/dice)의
         // 공통 조상인 root에 붙여 광원 엔티티를 가리키게 한다. 둘 다 같은 leaf
@@ -34,16 +36,12 @@ enum DiceSceneBuilder {
     static func makeCamera() -> Entity {
         let camera = Entity()
         var component = PerspectiveCameraComponent()
-        component.fieldOfViewInDegrees = 32
+        component.fieldOfViewInDegrees = 34
         camera.components.set(component)
-        // 레퍼런스와 같은 약 55도 부감. 거리와 화각은 트레이 안쪽이 화면을 채우도록 좁혔다 —
-        // 예전 값(0.42/0.30, 42도)은 바깥 벽과 테이블까지 담느라 주사위가 화면 높이의
-        // 4%밖에 안 됐다. 지금 값에서는 6.3%다.
-        //
-        // 구운 궤적 593개의 정지 위치 전부를 이 카메라로 투영해 확인했다:
-        // NDC |x| ≤ 0.95, |y| ≤ 0.90 (세로 화면 비율 1.20~1.40 전 구간). keep 선반은 y ≈ 0.71,
-        // 가장 뒤에서 멈춘 주사위는 y ≈ 0.44라 선반과 바닥이 확실히 갈라져 보인다.
-        camera.look(at: [0, 0, 0], from: [0, 0.369, 0.258], relativeTo: nil)
+        // 레퍼런스와 같은 약 55도 부감. 트레이 테두리가 네 변 모두 화면 안에 들어오면서도
+        // 주사위가 화면 높이의 5% 이상을 차지하도록 잡았다 — StageProjectionTests가
+        // 구운 궤적 593개의 정지 위치 전부와 keep 선반을 이 카메라로 투영해 확인한다.
+        camera.look(at: [0, 0, -0.005], from: [0, 0.372, 0.262], relativeTo: nil)
         return camera
     }
 
@@ -55,66 +53,82 @@ enum DiceSceneBuilder {
     }
 
     private static func makeTable() -> Entity {
-        var material = PhysicallyBasedMaterial()
-        material.baseColor = .init(tint: .init(red: 0.45, green: 0.29, blue: 0.16, alpha: 1))
-        material.roughness = .init(floatLiteral: 0.55)
-        material.metallic = .init(floatLiteral: 0)
-        let entity = ModelEntity(mesh: .generatePlane(width: 2, depth: 2), materials: [material])
+        let entity = ModelEntity(mesh: .generatePlane(width: 1.2, depth: 1.2),
+                                 materials: [SceneMaterials.walnut(along: .u, tone: 0.55, tiling: 5)])
         entity.name = "table"
         entity.position = [0, -TrayGeometry.wallThickness, 0]
         return entity
     }
 
+    /// 가죽 바닥 + 호두나무 테두리 4면 + keep 선반.
     private static func makeTray() -> Entity {
-        var leather = PhysicallyBasedMaterial()
-        leather.baseColor = .init(tint: .init(red: 0.52, green: 0.11, blue: 0.11, alpha: 1))
-        leather.roughness = .init(floatLiteral: 0.85)
-        leather.metallic = .init(floatLiteral: 0)
-
-        var rim = PhysicallyBasedMaterial()
-        rim.baseColor = .init(tint: .init(red: 0.72, green: 0.72, blue: 0.74, alpha: 1))
-        rim.roughness = .init(floatLiteral: 0.35)
-        rim.metallic = .init(floatLiteral: 0.9)
-
         let tray = Entity()
         tray.name = "tray"
         let t = TrayGeometry.wallThickness
         let inner = TrayGeometry.trayInner
+        let h = TrayGeometry.visualWallHeight
 
-        let floor = ModelEntity(mesh: .generateBox(size: [inner.x, t, inner.z]), materials: [leather])
+        let floor = ModelEntity(mesh: .generateBox(size: [inner.x, t, inner.z]),
+                                materials: [SceneMaterials.leather(vignette: true)])
+        floor.name = "floor"
         floor.position = [0, -t / 2, 0]
         tray.addChild(floor)
 
         // 벽은 물리 높이(inner.y)가 아니라 눈에 보이는 테두리 높이로 그린다 — 이유는
         // TrayGeometry.visualWallHeight 주석 참고. 물리 궤적은 여전히 0.12 상자에서 구웠다.
-        let h = TrayGeometry.visualWallHeight
-        let walls: [(SIMD3<Float>, SIMD3<Float>)] = [
-            ([inner.x + 2 * t, h, t], [0, h / 2,  (inner.z + t) / 2]),
-            ([inner.x + 2 * t, h, t], [0, h / 2, -(inner.z + t) / 2]),
-            ([t, h, inner.z], [ (inner.x + t) / 2, h / 2, 0]),
-            ([t, h, inner.z], [-(inner.x + t) / 2, h / 2, 0]),
+        // 벽 바깥 면은 테이블 아래(-t)까지 내려 트레이가 통짜 나무 상자로 보이게 한다.
+        let wallHeight = h + t
+        let wallY = (h - t) / 2
+        // generateBox의 UV는 어느 면이든 u가 그 면의 가로 방향이다. 벽의 보이는 면은 안쪽 면이고,
+        // 그 면의 가로 방향이 곧 벽의 길이 방향이라 결은 항상 u를 따라 흐르면 된다.
+        let wood = SceneMaterials.walnut(along: .u)
+        let walls: [(size: SIMD3<Float>, offset: SIMD3<Float>)] = [
+            ([inner.x + 2 * t, wallHeight, t], [0, wallY,  (inner.z + t) / 2]),
+            ([inner.x + 2 * t, wallHeight, t], [0, wallY, -(inner.z + t) / 2]),
+            ([t, wallHeight, inner.z], [ (inner.x + t) / 2, wallY, 0]),
+            ([t, wallHeight, inner.z], [-(inner.x + t) / 2, wallY, 0]),
         ]
-        for (size, offset) in walls {
-            let wall = ModelEntity(mesh: .generateBox(size: size), materials: [rim])
-            wall.position = offset
-            tray.addChild(wall)
+        for wall in walls {
+            let entity = ModelEntity(mesh: .generateBox(size: wall.size, cornerRadius: t * 0.28),
+                                     materials: [wood])
+            entity.name = "wall"
+            entity.position = wall.offset
+            tray.addChild(entity)
         }
 
-        tray.addChild(makeShelf(material: rim))
+        tray.addChild(makeShelf())
         return tray
     }
 
-    /// keep한 주사위가 올라앉는 선반. 트레이 뒤쪽 벽에 붙은 턱이다.
+    /// keep한 주사위가 올라앉는 선반. 트레이 뒤쪽 벽에 붙은 호두나무 턱 위에 가죽 패드를 깔았다.
     /// 굴러간 주사위가 절대 멈추지 않는 띠 위에 놓으므로 둘이 겹칠 일이 없다
-    /// (TrayGeometry.shelfFrontZ 주석 참고).
-    private static func makeShelf(material: PhysicallyBasedMaterial) -> ModelEntity {
+    /// (TrayGeometry.shelfFrontZ 주석 참고). 가죽 패드 윗면이 정확히 `shelfTop`이라
+    /// 주사위는 `shelfDieY`에 앉으면 패드에 닿는다.
+    private static func makeShelf() -> Entity {
         let depth = TrayGeometry.shelfFrontZ - TrayGeometry.shelfBackZ
-        let shelf = ModelEntity(
-            mesh: .generateBox(size: [TrayGeometry.trayInner.x, TrayGeometry.shelfTop, depth],
-                               cornerRadius: 0.001),
-            materials: [material])
+        let padThickness: Float = 0.0025
+        let inset: Float = 0.004
+
+        let shelf = Entity()
         shelf.name = "shelf"
-        shelf.position = [0, TrayGeometry.shelfTop / 2, TrayGeometry.shelfDieZ]
+
+        let ledgeHeight = TrayGeometry.shelfTop - padThickness * 0.6
+        let ledge = ModelEntity(
+            mesh: .generateBox(size: [TrayGeometry.trayInner.x, ledgeHeight, depth], cornerRadius: 0.002),
+            materials: [SceneMaterials.walnut(along: .u)])
+        ledge.name = "ledge"
+        ledge.position = [0, ledgeHeight / 2, TrayGeometry.shelfDieZ]
+        shelf.addChild(ledge)
+
+        // 패드는 가로가 세로의 6배쯤 되는 띠라, 세로 UV를 그만큼 줄여 결 알갱이를 정사각으로 맞춘다.
+        let padWidth = TrayGeometry.trayInner.x - 2 * inset
+        let padDepth = depth - 2 * inset
+        let pad = ModelEntity(
+            mesh: .generateBox(size: [padWidth, padThickness, padDepth], cornerRadius: 0.001),
+            materials: [SceneMaterials.leather(vignette: false, tiling: [1, padDepth / padWidth])])
+        pad.name = "pad"
+        pad.position = [0, TrayGeometry.shelfTop - padThickness / 2, TrayGeometry.shelfDieZ]
+        shelf.addChild(pad)
         return shelf
     }
 
@@ -123,27 +137,12 @@ enum DiceSceneBuilder {
     static func makeDieMesh() -> MeshResource {
         let size = TrayGeometry.dieSize
         return .generateBox(width: size, height: size, depth: size,
-                            cornerRadius: size * 0.10, splitFaces: true)
+                            cornerRadius: size * 0.12, splitFaces: true)
     }
 
-    /// 머티리얼 인덱스 순서대로 6장. 텍스처를 못 만들면 눈 없는 흰 주사위 하나를 돌려준다 —
-    /// 게임이 시작조차 못 하는 것보다는 낫다.
+    /// 머티리얼 인덱스 순서대로 6장.
     static func makeDieMaterials() -> [PhysicallyBasedMaterial] {
-        var ceramic = PhysicallyBasedMaterial()
-        ceramic.baseColor = .init(tint: .init(red: 0.97, green: 0.96, blue: 0.93, alpha: 1))
-        ceramic.roughness = .init(floatLiteral: 0.35)
-        ceramic.metallic = .init(floatLiteral: 0)
-        ceramic.clearcoat = .init(floatLiteral: 0.4)
-        ceramic.clearcoatRoughness = .init(floatLiteral: 0.2)
-
-        guard let faces = DiePipTexture.makeFaceTextures() else { return [ceramic] }
-        return faces.map { image in
-            var material = ceramic
-            if let texture = try? TextureResource(image: image, options: .init(semantic: .color)) {
-                material.baseColor = .init(tint: .white, texture: .init(texture))
-            }
-            return material
-        }
+        SceneMaterials.dice()
     }
 
     private static func makeDice() -> [ModelEntity] {
@@ -153,63 +152,9 @@ enum DiceSceneBuilder {
             let entity = ModelEntity(mesh: mesh, materials: materials)
             entity.name = "die\(index)"
             entity.position = restingPosition(slot: index)
+            // 바닥과 닿는 자리에 부드러운 접촉 그림자. 이게 없으면 주사위가 바닥 위에 떠 보인다.
+            entity.components.set(GroundingShadowComponent(castsShadow: true))
             return entity
         }
-    }
-
-    /// 방향광은 그림자를 만들고, IBL이 재질의 질감을 만든다.
-    /// 스펙 §7.5: 레퍼런스의 "따뜻한 실내 조명에 놓인 실물" 느낌은 대부분 IBL에서 온다.
-    /// 방향광만 쓰면 주사위가 플라스틱처럼 납작해 보인다.
-    private static func makeLighting() -> Entity {
-        let rig = Entity()
-        rig.name = "lighting"
-
-        let key = Entity()
-        key.name = "keyLight"
-        var directional = DirectionalLightComponent(color: .white, intensity: 2_400)
-        directional.isRealWorldProxy = false
-        key.components.set(directional)
-        key.components.set(DirectionalLightComponent.Shadow(maximumDistance: 1.0, depthBias: 1.0))
-        key.look(at: [0, 0, 0], from: [0.3, 0.6, 0.25], relativeTo: nil)
-        rig.addChild(key)
-
-        if let ibl = makeImageBasedLight() { rig.addChild(ibl) }
-        return rig
-    }
-
-    /// 스튜디오 환경광. 외부 HDR 파일 없이 코드로 그러데이션 큐브맵을 만든다 (스펙 §13).
-    private static func makeImageBasedLight() -> Entity? {
-        guard let image = makeStudioEnvironmentImage(),
-              let resource = try? EnvironmentResource(equirectangular: image, withName: "studio")
-        else { return nil }
-
-        let entity = Entity()
-        entity.name = "ibl"
-        var component = ImageBasedLightComponent(source: .single(resource), intensityExponent: 1.0)
-        component.inheritsRotation = true
-        entity.components.set(component)
-        // 수신 컴포넌트는 여기 붙이지 않는다 — 비출 대상의 조상(root)에 붙는다 (makeRoot 참고).
-        return entity
-    }
-
-    /// 위는 따뜻한 흰색, 아래는 어두운 갈색으로 이어지는 등장방형 이미지.
-    /// 실내 테이블 위라는 상황을 최소 비용으로 흉내낸다.
-    private static func makeStudioEnvironmentImage() -> CGImage? {
-        let width = 256, height = 128
-        guard let context = CGContext(
-            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-
-        let top = CGColor(red: 1.00, green: 0.96, blue: 0.90, alpha: 1)
-        let bottom = CGColor(red: 0.20, green: 0.14, blue: 0.10, alpha: 1)
-        guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                        colors: [top, bottom] as CFArray,
-                                        locations: [0, 1]) else { return nil }
-        context.drawLinearGradient(gradient,
-                                   start: CGPoint(x: 0, y: height),
-                                   end: CGPoint(x: 0, y: 0),
-                                   options: [])
-        return context.makeImage()
     }
 }
