@@ -32,6 +32,12 @@ final class GameSession {
 
     var onLogChanged: (@Sendable (MatchRecord) -> Void)?
     var onCollisionCues: (@MainActor ([CollisionCue]) -> Void)?
+    /// 연출 중 주사위가 부딪히는 그 순간. 햅틱·사운드용.
+    var onCollisionCue: (@MainActor (CollisionCue) -> Void)?
+    /// 고정을 바꿨다.
+    var onHoldToggled: (@MainActor () -> Void)?
+    /// 기록했다: 카테고리, 점수, 이번 기록으로 상단 보너스를 달성했는가.
+    var onCommitted: (@MainActor (ScoreCategory, Int, Bool) -> Void)?
 
     private var botTask: Task<Void, Never>?
 
@@ -162,12 +168,17 @@ final class GameSession {
         case .toggleHold(let index):
             await commitEvents([.holdToggled(index)])
             stage.placeHeld(visibleState.held.sorted(), values: visibleState.dice)
+            onHoldToggled?()
         case .commit(let category):
             let points = category.score(visibleState.dice)
+            let bonusBefore = visibleState.scorecards[visibleState.currentPlayer].upperBonus
+            let seat = visibleState.currentPlayer
             var events: [Event] = [.committed(category, points)]
             let afterCommit = visibleState.applying(events[0])
             events.append(afterCommit.isAllScored ? .gameEnded : .turnAdvanced)
             await commitEvents(events)
+            let bonusReached = bonusBefore == 0 && visibleState.scorecards[seat].upperBonus > 0
+            onCommitted?(category, points, bonusReached)
             if !visibleState.isAllScored {
                 stage.reset()
                 scheduleTurnOwner(announceHandoff: true)
@@ -208,7 +219,8 @@ final class GameSession {
                 let slots = visibleState.rollableIndices
                 _ = await stage.roll(values: values, slots: slots,
                                      direction: ThrowDirection.allCases.randomElement() ?? .center,
-                                     skipAnimation: reduceMotion)
+                                     skipAnimation: reduceMotion,
+                                     onCue: { [weak self] cue in self?.onCollisionCue?(cue) })
                 record.log.append(event)
                 visibleState = visibleState.applying(event)
             case .holdToggled:
@@ -282,7 +294,8 @@ final class GameSession {
         let direction = nextThrowDirection ?? ThrowDirection.allCases.randomElement() ?? .center
         nextThrowDirection = nil
         let cues = await stage.roll(values: values, slots: slots,
-                                    direction: direction, skipAnimation: reduceMotion)
+                                    direction: direction, skipAnimation: reduceMotion,
+                                    onCue: { [weak self] cue in self?.onCollisionCue?(cue) })
         onCollisionCues?(cues)
 
         // 착지한 뒤에 노출한다

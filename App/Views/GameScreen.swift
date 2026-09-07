@@ -9,6 +9,7 @@ struct GameScreen: View {
 
     @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var feedback = FeedbackCoordinator()
 
     var body: some View {
         GeometryReader { geometry in
@@ -62,6 +63,7 @@ struct GameScreen: View {
         .onChange(of: reduceMotion, initial: true) { _, newValue in
             session.reduceMotion = newValue
         }
+        .task { feedback.attach(session) }
     }
 
     /// 3D 무대와 화면을 이어 붙이는 얇은 그림자.

@@ -43,9 +43,8 @@ struct MenuScreen: View {
                                             container.startGame(mode: .versusBot(difficulty))
                                         } label: {
                                             Label(difficulty.displayName, systemImage: difficultyIcon(difficulty))
-                                                .font(.subheadline.weight(.semibold))
                                                 .frame(maxWidth: .infinity)
-                                                .brassButton(prominent: difficulty == .normal)
+                                                .brassButton(prominent: difficulty == .normal, compact: true)
                                         }
                                         .buttonStyle(.plain)
                                         .accessibilityIdentifier("menu.bot.\(difficulty.rawValue)")

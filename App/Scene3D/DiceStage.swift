@@ -54,7 +54,7 @@ final class DiceStage {
     ///   - skipAnimation: Reduce Motion이 켜져 있으면 true.
     /// - Returns: 재생 중 터뜨릴 충돌 큐. 호출자가 사운드·햅틱에 쓴다.
     func roll(values: [Int], slots: [Int], direction: ThrowDirection,
-              skipAnimation: Bool) async -> [CollisionCue] {
+              skipAnimation: Bool, onCue: ((CollisionCue) -> Void)? = nil) async -> [CollisionCue] {
         precondition(values.count == slots.count, "값과 슬롯의 개수가 다르다")
         guard !slots.isEmpty else { return [] }
 
@@ -76,8 +76,12 @@ final class DiceStage {
 
         if skipAnimation {
             applyFrame(trajectory.frameCount - 1, of: trajectory, slots: slots, offsets: offsets)
+            for cue in trajectory.collisions { onCue?(cue) }
             return trajectory.collisions
         }
+        // 프레임 순으로 정렬돼 있으므로 커서 하나로 그 프레임에 도달할 때마다 알린다
+        let cues = trajectory.collisions.sorted { $0.frame < $1.frame }
+        var cueCursor = 0
 
         let frameDuration = Duration.seconds(1.0 / Double(trajectory.frameRate))
         var clock = ContinuousClock.now
@@ -102,6 +106,10 @@ final class DiceStage {
 
         for frame in 0..<trajectory.frameCount {
             applyFrame(frame, of: trajectory, slots: slots, offsets: offsets)
+            while cueCursor < cues.count, Int(cues[cueCursor].frame) <= frame {
+                onCue?(cues[cueCursor])
+                cueCursor += 1
+            }
             clock += frameDuration
             try? await Task.sleep(until: clock, clock: .continuous)
         }

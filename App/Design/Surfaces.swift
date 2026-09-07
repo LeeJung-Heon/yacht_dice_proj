@@ -42,13 +42,16 @@ struct BrassButton: ViewModifier {
     @Environment(\.theme) private var theme
     @Environment(\.isEnabled) private var isEnabled
     let prominent: Bool
+    var compact = false
 
     func body(content: Content) -> some View {
         content
-            .font(.headline)
+            .font(compact ? .subheadline.weight(.semibold) : .headline)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
             .foregroundStyle(prominent ? theme.brassInk : theme.brass)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
+            .padding(.horizontal, compact ? 10 : 20)
+            .padding(.vertical, compact ? 9 : 12)
             .background {
                 if prominent {
                     Capsule().fill(LinearGradient(colors: [theme.brass, theme.brass.opacity(0.78)],
@@ -66,7 +69,9 @@ struct BrassButton: ViewModifier {
 extension View {
     func paperCard(padding: CGFloat = 16) -> some View { modifier(PaperCard(padding: padding)) }
     func leatherPanel() -> some View { modifier(LeatherPanel()) }
-    func brassButton(prominent: Bool = true) -> some View { modifier(BrassButton(prominent: prominent)) }
+    func brassButton(prominent: Bool = true, compact: Bool = false) -> some View {
+        modifier(BrassButton(prominent: prominent, compact: compact))
+    }
 }
 
 /// 화면 바탕. 호두나무 테이블.

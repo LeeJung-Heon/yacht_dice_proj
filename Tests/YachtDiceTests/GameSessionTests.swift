@@ -177,6 +177,52 @@ struct GameSessionTests {
         #expect(recorder.count > 0, "저장 훅이 불리지 않았다")
     }
 
+    @Test("기록 콜백이 카테고리·점수·보너스 달성 여부를 준다")
+    func 기록_콜백() async throws {
+        let session = try makeSession(script: [[6, 6, 6, 6, 6]])
+        let box = CommitBox()
+        session.onCommitted = { box.record($0, $1, $2) }
+        await session.send(.roll)
+        await session.send(.commit(.yacht))
+        #expect(box.last?.0 == .yacht && box.last?.1 == 50 && box.last?.2 == false)
+    }
+
+    @Test("상단 보너스를 완성하는 기록은 달성 플래그가 참이다")
+    func 보너스_콜백() async throws {
+        // 매 턴 같은 눈 5개 → Sixes 30, Fives 25, Fours 20 = 75 ≥ 63. 세 번째 기록에서 달성.
+        let session = try makeSession(script: [[6, 6, 6, 6, 6], [5, 5, 5, 5, 5], [4, 4, 4, 4, 4]])
+        let box = CommitBox()
+        session.onCommitted = { box.record($0, $1, $2) }
+        await session.send(.roll); await session.send(.commit(.sixes))
+        #expect(box.last?.2 == false)
+        await session.send(.roll); await session.send(.commit(.fives))
+        #expect(box.last?.2 == false)
+        await session.send(.roll); await session.send(.commit(.fours))
+        #expect(box.last?.2 == true, "63점을 넘긴 기록인데 보너스 달성이 아니라고 한다")
+    }
+
+    @Test("고정 콜백과 충돌 큐 콜백이 불린다")
+    func 고정_충돌_콜백() async throws {
+        let session = try makeSession(script: [[1, 2, 3, 4, 5]])
+        let counter = Counter()
+        session.onHoldToggled = { counter.holds += 1 }
+        session.onCollisionCue = { _ in counter.cues += 1 }
+        await session.send(.roll)
+        await session.send(.toggleHold(2))
+        #expect(counter.holds == 1)
+        #expect(counter.cues > 0, "충돌 큐가 한 번도 오지 않았다")
+    }
+
+    final class CommitBox: @unchecked Sendable {
+        var last: (ScoreCategory, Int, Bool)?
+        func record(_ c: ScoreCategory, _ p: Int, _ b: Bool) { last = (c, p, b) }
+    }
+
+    final class Counter: @unchecked Sendable {
+        var holds = 0
+        var cues = 0
+    }
+
     final class LogRecorder: @unchecked Sendable {
         private(set) var count = 0
         func record(_ record: MatchRecord) { count += 1 }
