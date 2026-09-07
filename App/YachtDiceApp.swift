@@ -6,16 +6,18 @@ struct YachtDiceApp: App {
 
     var body: some Scene {
         WindowGroup {
-            switch container.status {
-            case .menu:
-                MenuScreen(container: container)
-            case .playing(let session):
-                if let stage = container.currentStage {
-                    GameScreen(session: session, stage: stage, onReturnToMenu: { container.returnToMenu() })
+            ThemedRoot {
+                switch container.status {
+                case .menu:
+                    MenuScreen(container: container)
+                case .playing(let session):
+                    if let stage = container.currentStage {
+                        GameScreen(session: session, stage: stage, onReturnToMenu: { container.returnToMenu() })
+                    }
+                case .failed(let message):
+                    ContentUnavailableView("시작할 수 없습니다", systemImage: "exclamationmark.triangle",
+                                           description: Text(message))
                 }
-            case .failed(let message):
-                ContentUnavailableView("시작할 수 없습니다", systemImage: "exclamationmark.triangle",
-                                       description: Text(message))
             }
         }
     }

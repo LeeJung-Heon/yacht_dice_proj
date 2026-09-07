@@ -36,11 +36,12 @@
 | `ink` | 먹색 `#1E1A17` | 상아색 `#F1E9D6` | 본문 글자 |
 | `inkSecondary` | `#6E6255` | `#B8AC98` | 보조 글자 |
 | `brass` | `#B8862B` | `#D3A24A` | 강조(버튼, 링, 미리보기 점수) |
-| `brassInk` | `#4A3408` | `#1E1608` | 황동 위 글자 |
+| `brassInk` | `#2A1D04` | `#1E1608` | 황동 위 글자 |
 | `success` | `#2E6B3F` | `#7CC28F` | 보너스 달성 |
 | `ivory` | `#F7F3EA` | `#F7F3EA` | 주사위 면 (모드 무관) |
+| `pip` | `#171516` | `#171516` | 주사위 눈 (모드 무관) |
 
-대비 규칙: `ink`/`paper`, `inkSecondary`/`paper`, `brassInk`/`brass`, `ink`/`ivory` 조합은 WCAG 4.5:1 이상.
+대비 규칙: `ink`/`paper`, `inkSecondary`/`paper`, `brassInk`/`brass`, `pip`/`ivory`, `ivory`/`leather` 조합은 WCAG 4.5:1 이상.
 `ThemeContrastTests`가 상대 휘도를 계산해 강제한다. 황동색 글자를 종이 위에 직접 쓰지 않는다 — 미리보기 점수는
 `brass` 배경의 알약에 `brassInk`로 쓴다.
 
