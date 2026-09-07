@@ -66,12 +66,17 @@ final class DiceStage {
             return []
         }
 
-        // 굴리는 각 주사위에 대해 오프셋을 미리 계산한다
+        // 굴리는 각 주사위에 대해 오프셋을 미리 계산한다.
+        // 4개 후보 중 지금 자세에서 가장 적게 도는 것을 고른다 — 무작위로 고르면 리드인 0.2초 동안
+        // 주사위가 제자리에서 중앙값 100도를 돌아 "던지기 전에 빙글 도는" 것처럼 보였다.
+        // 다양성은 궤적 선택이 만든다.
         let offsets = (0..<slots.count).map { lane in
-            FaceControl.offset(
+            let yaw = Self.leastRotationYawChoice(
+                current: dice[slots[lane]].orientation, trajectory: trajectory, die: lane, showing: values[lane])
+            return FaceControl.offset(
                 restUpFace: trajectory.restUpFace(die: lane),
                 showing: values[lane],
-                yawChoice: Int.random(in: 0..<4, using: &generator))
+                yawChoice: yaw)
         }
 
         if skipAnimation {
@@ -151,6 +156,25 @@ final class DiceStage {
     }
 
     // MARK: - 내부
+
+    /// 두 자세 사이의 회전각(라디안). q와 -q는 같은 회전이다.
+    static func rotationAngle(from a: simd_quatf, to b: simd_quatf) -> Float {
+        let d = min(1, abs(simd_dot(simd_normalize(a).vector, simd_normalize(b).vector)))
+        return 2 * acos(d)
+    }
+
+    /// 목표 눈을 만드는 4개 오프셋 중 궤적 첫 프레임 자세가 `current`에서 가장 가까운 것.
+    static func leastRotationYawChoice(current: simd_quatf, trajectory: Trajectory, die: Int, showing value: Int) -> Int {
+        var best = 0
+        var bestAngle = Float.infinity
+        for yaw in 0..<4 {
+            let offset = FaceControl.offset(restUpFace: trajectory.restUpFace(die: die), showing: value, yawChoice: yaw)
+            let start = trajectory.posed(die: die, frame: 0, offset: offset).orientation
+            let angle = rotationAngle(from: current, to: start)
+            if angle < bestAngle { bestAngle = angle; best = yaw }
+        }
+        return best
+    }
 
     private func applyFrame(_ frame: Int, of trajectory: Trajectory,
                             slots: [Int], offsets: [simd_quatf]) {

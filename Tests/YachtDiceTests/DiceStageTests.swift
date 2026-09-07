@@ -68,3 +68,32 @@ struct DiceStageTests {
         #expect(!cues.isEmpty, "충돌 큐가 비어 있다 — 사운드와 햅틱을 붙일 수 없다")
     }
 }
+
+@Suite("주사위 무대 - 리드인 회전")
+@MainActor
+struct DiceStageLeadInTests {
+    @Test("4개 오프셋 중 지금 자세에서 가장 적게 도는 것을 고른다", arguments: 1...6)
+    func 최소_회전(value: Int) throws {
+        let library = try TrajectoryLibrary.bundled()
+        let trajectory = library.all[0]
+        let current = OctahedralGroup.elements[0]
+        let chosen = DiceStage.leastRotationYawChoice(
+            current: current, trajectory: trajectory, die: 0, showing: value)
+        let angles = (0..<4).map { yaw in
+            let offset = FaceControl.offset(restUpFace: trajectory.restUpFace(die: 0), showing: value, yawChoice: yaw)
+            let start = trajectory.posed(die: 0, frame: 0, offset: offset).orientation
+            return DiceStage.rotationAngle(from: current, to: start)
+        }
+        #expect(angles[chosen] <= angles.min()! + 1e-5, "고른 \(chosen)의 회전 \(angles[chosen])이 최소 \(angles.min()!)가 아니다")
+    }
+
+    @Test("회전각: 같은 자세는 0, 90도 돌린 자세는 90도")
+    func 회전각() {
+        let a = simd_quatf(angle: 0, axis: [0, 1, 0])
+        let b = simd_quatf(angle: .pi / 2, axis: [0, 1, 0])
+        #expect(DiceStage.rotationAngle(from: a, to: a) < 1e-5)
+        #expect(abs(DiceStage.rotationAngle(from: a, to: b) - .pi / 2) < 1e-4)
+        // q와 -q는 같은 회전이다
+        #expect(DiceStage.rotationAngle(from: a, to: simd_quatf(vector: -a.vector)) < 1e-5)
+    }
+}
