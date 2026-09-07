@@ -22,10 +22,12 @@ final class AppContainer {
 
         do {
             let stage = DiceStage(library: try TrajectoryLibrary.bundled())
-            let restored = store.load()
+            let restored = store.load()?.log
             let session = GameSession(driver: LocalDriver(), stage: stage,
                                       log: restored ?? MatchLog(playerCount: 1))
-            session.onLogChanged = { log in try? store.save(log) }
+            session.onLogChanged = { log in
+                try? store.save(MatchRecord(mode: .solo, participants: GameMode.solo.participants, log: log))
+            }
 
             // 복원한 판이면 주사위를 마지막 상태로 앉힌다. 그림은 즉시 확정되지만
             // roll()이 async라 한 틱 뒤에 실행된다 — 첫 입력보다는 항상 먼저다.

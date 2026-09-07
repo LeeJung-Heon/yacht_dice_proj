@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import YachtCore
+import YachtBot
 @testable import YachtDice
 
 @Suite("진행 저장")
@@ -13,19 +14,72 @@ struct MatchStoreTests {
         return (MatchStore(directory: directory), directory)
     }
 
-    @Test("저장한 로그를 그대로 읽는다")
+    /// 12턴을 전부 채운 로그.
+    private func finishedRecord() -> MatchRecord {
+        var record = MatchRecord(mode: .solo)
+        for category in ScoreCategory.allCases {
+            record.log.append(.rolled([1, 1, 1, 1, 1]))
+            let points = category.score([1, 1, 1, 1, 1])
+            record.log.append(.committed(category, points))
+            record.log.append(record.log.state.isAllScored ? .gameEnded : .turnAdvanced)
+        }
+        return record
+    }
+
+    @Test("저장한 기록을 그대로 읽는다 — 모드와 참가자까지")
     func 왕복() throws {
         let (store, directory) = try makeTempStore()
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        var log = MatchLog(playerCount: 1)
-        log.append(.rolled([6, 6, 6, 6, 6]))
-        log.append(.committed(.yacht, 50))
-        try store.save(log)
+        var record = MatchRecord(mode: .versusBot(.hard))
+        record.log.append(.rolled([6, 6, 6, 6, 6]))
+        record.log.append(.committed(.yacht, 50))
+        try store.save(record)
 
         let loaded = try #require(store.load())
-        #expect(loaded == log)
-        #expect(loaded.state.scorecards[0].entry(.yacht) == 50)
+        #expect(loaded == record)
+        #expect(loaded.participants == [.human(name: "나"), .bot(.hard)])
+        #expect(loaded.log.state.scorecards[0].entry(.yacht) == 50)
+    }
+
+    @Test("v1 파일(로그만)은 혼자 연습으로 읽는다")
+    func v1_호환() throws {
+        let (store, directory) = try makeTempStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        var log = MatchLog(playerCount: 1)
+        log.append(.rolled([1, 2, 3, 4, 5]))
+        try log.encoded().write(to: directory.appending(path: "match.json"))
+
+        let loaded = try #require(store.load())
+        #expect(loaded.mode == .solo)
+        #expect(loaded.participants == [.human(name: "나")])
+        #expect(loaded.log == log)
+    }
+
+    @Test("참가자 수와 로그의 플레이어 수가 다르면 버린다")
+    func 불일치_거부() throws {
+        let (store, directory) = try makeTempStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let record = MatchRecord(mode: .passAndPlay(names: ["A", "B"]),
+                                 participants: [.human(name: "A")],
+                                 log: MatchLog(playerCount: 2))
+        let data = try JSONEncoder().encode(record)
+        try data.write(to: directory.appending(path: "match.json"))
+        #expect(store.load() == nil)
+    }
+
+    @Test("손상된 로그가 든 v2 파일은 버린다")
+    func 손상_로그_거부() throws {
+        let (store, directory) = try makeTempStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        var log = MatchLog(playerCount: 1)
+        log.append(.committed(.yacht, 999))   // 굴리기 전에 기록 — canApply가 거부
+        let record = MatchRecord(mode: .solo, participants: GameMode.solo.participants, log: log)
+        try JSONEncoder().encode(record).write(to: directory.appending(path: "match.json"))
+        #expect(store.load() == nil)
     }
 
     @Test("저장한 적이 없으면 nil이다")
@@ -39,36 +93,27 @@ struct MatchStoreTests {
     func 삭제() throws {
         let (store, directory) = try makeTempStore()
         defer { try? FileManager.default.removeItem(at: directory) }
-
-        var log = MatchLog(playerCount: 1)
-        log.append(.rolled([1, 1, 1, 1, 1]))
-        try store.save(log)
+        try store.save(MatchRecord(mode: .solo))
         try store.clear()
         #expect(store.load() == nil)
     }
 
-    @Test("깨진 파일은 nil로 처리하고 앱을 막지 않는다")
-    func 손상된_파일() throws {
+    @Test("끝난 게임은 저장하지 않고 기존 파일도 지운다")
+    func 끝난_게임() throws {
         let (store, directory) = try makeTempStore()
         defer { try? FileManager.default.removeItem(at: directory) }
+        try store.save(MatchRecord(mode: .solo))
 
-        try Data("이건 JSON이 아니다".utf8).write(to: directory.appending(path: "match.json"))
-        #expect(store.load() == nil, "깨진 저장 파일 때문에 앱이 시작되지 못하면 안 된다")
+        let record = finishedRecord()
+        #expect(record.isFinished)
+        try store.save(record)
+        #expect(store.load() == nil)
     }
 
-    @Test("끝난 게임은 저장하지 않는다")
-    func 완결된_게임() throws {
-        let (store, directory) = try makeTempStore()
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        var log = MatchLog(playerCount: 1)
-        for category in ScoreCategory.allCases {
-            log.append(.rolled([1, 1, 1, 1, 1]))
-            log.append(.committed(category, 0))
-            log.append(.turnAdvanced)
-        }
-        log.append(.gameEnded)
-        try store.save(log)
-        #expect(store.load() == nil, "끝난 게임을 복원하면 결과 화면에 갇힌다")
+    @Test("패스앤플레이 참가자는 이름 순서대로다")
+    func 패스앤플레이_참가자() {
+        let record = MatchRecord(mode: .passAndPlay(names: ["철수", "영희", "민수"]))
+        #expect(record.participants == [.human(name: "철수"), .human(name: "영희"), .human(name: "민수")])
+        #expect(record.log.playerCount == 3)
     }
 }
