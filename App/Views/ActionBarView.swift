@@ -101,14 +101,16 @@ struct ActionBarView: View {
             HStack(spacing: 8) {
                 Image(systemName: "dice.fill")
                 Text("Roll")
-                HStack(spacing: 3) {
-                    ForEach(0..<YachtCore.maxRollsPerTurn, id: \.self) { index in
-                        Circle()
-                            .fill(index < state.rollsRemaining ? theme.brassInk : theme.brassInk.opacity(0.25))
-                            .frame(width: 6, height: 6)
-                    }
-                }
-                .accessibilityHidden(true)
+                // 남은 횟수. 점 세 개는 한눈에 안 읽혀서 숫자로 쓴다.
+                Text("\(state.rollsRemaining)")
+                    .font(.subheadline.weight(.bold))
+                    .monospacedDigit()
+                    .foregroundStyle(theme.brass)
+                    .frame(minWidth: 26, minHeight: 26)
+                    .background(Circle().fill(theme.brassInk))
+                    .contentTransition(.numericText())
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: state.rollsRemaining)
+                    .accessibilityHidden(true)
             }
             .brassButton(prominent: true)
         }
