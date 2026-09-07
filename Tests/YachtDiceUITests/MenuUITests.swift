@@ -1,0 +1,79 @@
+import XCTest
+
+final class MenuUITests: XCTestCase {
+
+    override func setUp() { continueAfterFailure = false }
+
+    @MainActor
+    func test_컴퓨터_대전_한_턴() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetMatch"]
+        app.launch()
+
+        let bot = app.buttons["menu.bot"]
+        XCTAssertTrue(bot.waitForExistence(timeout: 10))
+        bot.tap()
+        let normal = app.buttons["menu.bot.normal"]
+        XCTAssertTrue(normal.waitForExistence(timeout: 5))
+        normal.tap()
+
+        // combine된 요소는 타입이 고정되지 않으므로 어느 타입이든 찾는다
+        XCTAssertTrue(app.descendants(matching: .any)["players.seat.1"].waitForExistence(timeout: 10), "참가자 띠가 없다")
+        let roll = app.buttons["action.roll"]
+        XCTAssertTrue(roll.waitForHittable(timeout: 10))
+        roll.tap()
+        let row = app.buttons["scoreboard.row.choice"]
+        XCTAssertTrue(row.waitForHittable(timeout: 15))
+        row.tap()
+
+        // 봇 차례: 상태 표시가 뜨고 입력이 잠긴다
+        XCTAssertTrue(app.staticTexts["header.status"].waitForExistence(timeout: 5), "봇 차례 표시가 없다")
+        XCTAssertFalse(roll.isEnabled, "봇 차례인데 Roll이 활성이다")
+
+        // 봇이 끝내면 내 차례로 돌아온다 (굴림 3회 연출 최대 ~8초)
+        XCTAssertTrue(roll.waitForHittable(timeout: 30), "봇 턴이 끝나지 않았다")
+        XCTAssertEqual(app.otherElements["header.turn"].label, "Turn 2/12")
+    }
+
+    @MainActor
+    func test_로컬_2인_핸드오프() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetMatch"]
+        app.launch()
+
+        let local = app.buttons["menu.local"]
+        XCTAssertTrue(local.waitForExistence(timeout: 10))
+        local.tap()
+        let start = app.buttons["menu.local.start"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+
+        let roll = app.buttons["action.roll"]
+        XCTAssertTrue(roll.waitForHittable(timeout: 10))
+        roll.tap()
+        let row = app.buttons["scoreboard.row.choice"]
+        XCTAssertTrue(row.waitForHittable(timeout: 15))
+        row.tap()
+
+        let handoff = app.buttons["handoff.start"]
+        XCTAssertTrue(handoff.waitForExistence(timeout: 5), "핸드오프가 뜨지 않았다")
+        handoff.tap()
+        XCTAssertTrue(roll.waitForHittable(timeout: 5), "두 번째 사람이 굴릴 수 없다")
+    }
+
+    @MainActor
+    func test_메뉴로_돌아가면_이어하기가_있다() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetMatch"]
+        app.launch()
+        let solo = app.buttons["menu.solo"]
+        XCTAssertTrue(solo.waitForExistence(timeout: 10))
+        solo.tap()
+        let roll = app.buttons["action.roll"]
+        XCTAssertTrue(roll.waitForHittable(timeout: 10))
+        roll.tap()
+        XCTAssertTrue(app.buttons["scoreboard.row.choice"].waitForHittable(timeout: 15))
+        app.buttons["header.menu"].tap()
+        XCTAssertTrue(app.buttons["menu.resume"].waitForExistence(timeout: 5), "이어하기가 없다")
+    }
+}

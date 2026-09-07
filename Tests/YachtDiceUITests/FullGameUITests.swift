@@ -13,6 +13,10 @@ final class FullGameUITests: XCTestCase {
         app.launchArguments = ["-resetMatch"]
         app.launch()
 
+        let solo = app.buttons["menu.solo"]
+        XCTAssertTrue(solo.waitForExistence(timeout: 10), "메뉴가 뜨지 않았다")
+        solo.tap()
+
         let roll = app.buttons["action.roll"]
         XCTAssertTrue(roll.waitForExistence(timeout: 15), "Roll 버튼이 없다")
 
@@ -53,6 +57,10 @@ final class FullGameUITests: XCTestCase {
         app.launchArguments = ["-resetMatch"]
         app.launch()
 
+        let solo = app.buttons["menu.solo"]
+        XCTAssertTrue(solo.waitForExistence(timeout: 10), "메뉴가 뜨지 않았다")
+        solo.tap()
+
         let roll = app.buttons["action.roll"]
         XCTAssertTrue(roll.waitForHittable(timeout: 15))
         roll.tap()
@@ -67,6 +75,10 @@ final class FullGameUITests: XCTestCase {
         app.terminate()
         let relaunched = XCUIApplication()
         relaunched.launch()   // -resetMatch 없이
+
+        let resume = relaunched.buttons["menu.resume"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 10), "이어하기가 뜨지 않았다")
+        resume.tap()
 
         let header = relaunched.otherElements["header.turn"]
         XCTAssertTrue(header.waitForExistence(timeout: 15))

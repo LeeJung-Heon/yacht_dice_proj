@@ -15,6 +15,10 @@ final class AccessibilityUITests: XCTestCase {
         app.launchArguments = ["-resetMatch"]
         app.launch()
 
+        let solo = app.buttons["menu.solo"]
+        XCTAssertTrue(solo.waitForExistence(timeout: 10), "메뉴가 뜨지 않았다")
+        solo.tap()
+
         let roll = app.buttons["action.roll"]
         XCTAssertTrue(roll.waitForExistence(timeout: 20), "Roll 버튼이 트리에 없다")
 

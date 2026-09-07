@@ -30,10 +30,30 @@ struct MenuScreen: View {
                     }
                     .accessibilityIdentifier("menu.solo")
 
-                    Button { showingBotPicker = true } label: {
-                        Label("컴퓨터 대전", systemImage: "cpu")
+                    Button { withAnimation { showingBotPicker.toggle() } } label: {
+                        HStack {
+                            Label("컴퓨터 대전", systemImage: "cpu")
+                            Spacer()
+                            Image(systemName: "chevron.down")
+                                .font(.caption).foregroundStyle(.secondary)
+                                .rotationEffect(.degrees(showingBotPicker ? 180 : 0))
+                        }
                     }
                     .accessibilityIdentifier("menu.bot")
+                    .accessibilityValue(showingBotPicker ? "난이도 펼침" : "난이도 접힘")
+
+                    // confirmationDialog는 버튼 식별자를 여러 요소에 복제해 UI 테스트가 하나를 고르지 못한다.
+                    // 목록 안에 펼치는 편이 손가락으로도 한 번 덜 누른다.
+                    if showingBotPicker {
+                        ForEach(BotDifficulty.allCases, id: \.self) { difficulty in
+                            Button { container.startGame(mode: .versusBot(difficulty)) } label: {
+                                Label(difficulty.displayName, systemImage: difficultyIcon(difficulty))
+                                    .padding(.leading, 28)
+                            }
+                            .accessibilityIdentifier("menu.bot.\(difficulty.rawValue)")
+                            .accessibilityLabel("컴퓨터 대전, \(difficulty.displayName)")
+                        }
+                    }
 
                     Button { showingLocalSetup = true } label: {
                         Label("로컬 2~4인", systemImage: "person.2")
@@ -48,13 +68,15 @@ struct MenuScreen: View {
                 }
             }
             .navigationTitle("요트 다이스")
-            .confirmationDialog("난이도", isPresented: $showingBotPicker, titleVisibility: .visible) {
-                ForEach(BotDifficulty.allCases, id: \.self) { difficulty in
-                    Button(difficulty.displayName) { container.startGame(mode: .versusBot(difficulty)) }
-                        .accessibilityIdentifier("menu.bot.\(difficulty.rawValue)")
-                }
-            }
             .sheet(isPresented: $showingLocalSetup) { localSetup }
+        }
+    }
+
+    private func difficultyIcon(_ difficulty: BotDifficulty) -> String {
+        switch difficulty {
+        case .easy: "tortoise"
+        case .normal: "hare"
+        case .hard: "brain"
         }
     }
 
