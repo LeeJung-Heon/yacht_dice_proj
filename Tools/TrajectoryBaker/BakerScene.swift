@@ -136,11 +136,11 @@ final class BakerModel {
         return .success(trajectory)
     }
 
-    /// 던지기 시작 높이. TrayGeometry.shelfHeight(0.16, keep 주사위용 선반)를 그대로 쓰면
-    /// TrajectoryValidator의 트레이 상한(trayInner.y + dieSize = 0.136)을 프레임 0부터
-    /// 넘어서 거의 모든 궤적이 즉시 기각된다 (실측: 40개 중 39개 기각, "트레이를 벗어났다").
-    /// shelfHeight는 Task 13의 keep 선반 위치와 값을 공유해야 하므로 건드리지 않고,
-    /// 던지기 전용 높이를 트레이 벽 상단(0.12) 바로 위로 따로 둔다.
+    /// 던지기 시작 높이. TrajectoryValidator의 트레이 상한(trayInner.y + dieSize = 0.136)보다
+    /// 낮아야 한다 — 예전에 0.16에서 던졌더니 프레임 0부터 상한을 넘어 거의 모든 궤적이
+    /// 즉시 기각됐다 (실측: 40개 중 39개 기각, "트레이를 벗어났다").
+    /// 물리 벽 높이(0.12) 바로 아래에서 던진다. 화면에 그리는 벽은 이보다 훨씬 낮지만
+    /// (TrayGeometry.visualWallHeight), 궤적은 여전히 0.12 상자 안에서 굽는다.
     private static let throwHeight: Float = 0.10
 
     private func resetDice(dieCount: Int, direction: ThrowDirection) {

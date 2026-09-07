@@ -1,0 +1,80 @@
+# 요트 다이스 (Yacht Dice)
+
+닌텐도 『세계의 게임 대전 51』의 Yacht Dice를 레퍼런스로 삼은 iOS 네이티브 야추 다이스 게임.
+RealityKit 3D 주사위, 이벤트 소싱 규칙 엔진, 세로 화면 전용. 현재 P1(싱글 플레이) 단계다.
+
+## 빌드
+
+Xcode 프로젝트는 저장소에 없다. [XcodeGen](https://github.com/yonaskolb/XcodeGen)이 `project.yml`에서 만든다.
+
+```sh
+brew install xcodegen
+xcodegen generate
+open YachtDice.xcodeproj
+```
+
+- 스킴 `YachtDice`: iOS 앱 + 단위 테스트 + UI 테스트
+- 스킴 `TrajectoryBaker`: 궤적을 굽는 macOS 툴 (아래 참고)
+- 요구 사항: Xcode 26, iOS 18 이상, Swift 6 strict concurrency
+
+테스트는 시뮬레이터에서 돌린다.
+
+```sh
+xcodebuild -project YachtDice.xcodeproj -scheme YachtDice \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
+```
+
+패키지 단위 테스트는 Xcode 없이도 돈다.
+
+```sh
+swift test --package-path Packages/YachtCore
+swift test --package-path Packages/DiceTrajectory
+```
+
+## 구조
+
+```
+SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
+                          ├─▶ YachtCore.GameState   (순수 규칙, 의존성 0)
+                          ├─▶ MatchDriver           (P1: Local / P2: AI / P3: Online)
+                          └─▶ DiceStage             (RealityKit 연출)
+```
+
+| 경로 | 역할 |
+|---|---|
+| `Packages/YachtCore` | 규칙 엔진. `Intent`(하고 싶은 것)와 `Event`(확정된 사실)를 분리한 이벤트 소싱. UI·3D를 모른다. |
+| `Packages/DiceTrajectory` | 구운 궤적 자료구조, 바이너리 포맷, 회전 오프셋(정육면체 대칭군), 트레이 치수. |
+| `App/Game` | `GameSession`(유일한 오케스트레이터), `MatchDriver`, 진행 저장(`MatchStore`). |
+| `App/Scene3D` | RealityKit 씬. `DiceSceneBuilder`(지오메트리), `SceneMaterials`(절차적 PBR 텍스처), `SceneLighting`(조명·IBL), `DiceStage`(궤적 재생). |
+| `App/Views` | 세로 화면 UI. 점수판, 액션 바, 결과 바. |
+| `App/AppContainer.swift` | 앱 조립과 저장된 판 복원. |
+| `Tools/TrajectoryBaker` | 물리 시뮬로 궤적을 굽는 macOS 앱. 결과는 `App/Resources/trajectories.bin`. |
+| `docs/superpowers` | 설계 스펙과 구현 계획. |
+
+### 주사위는 물리를 돌리지 않는다
+
+결과(눈)가 먼저 정해지고, 물리는 연출만 한다. 베이커가 미리 구운 궤적을 재생하되
+각 주사위의 회전에 정육면체 대칭군의 원소를 곱해 원하는 눈이 위를 향하게 한다.
+회전 대칭이라 매 프레임 주사위가 점유하는 공간은 원본과 완전히 같다 — 눈속임이 아니라 동일한 궤적이다.
+이 덕분에 온라인 대전(P3)에서 두 화면이 프레임 단위로 같고, 기기에서 물리를 돌리지 않는다.
+자세한 근거는 `docs/superpowers/specs/2026-08-28-yacht-dice-p1-core-3d-design.md` §7.
+
+### 3D 에셋은 전부 코드다
+
+가죽·호두나무·주사위 눈은 `App/Scene3D/ProceduralTexture.swift`의 결정적 노이즈로 앱 시작 시 그린다.
+외부 텍스처·모델 파일이 없다. 트레이의 **보이는 모양**(모서리 라운드, 선반 패드)은 자유롭게 바꿔도 되지만,
+주사위가 닿는 면의 위치(`TrayGeometry`)는 구운 궤적과 맞물려 있으니 바꾸면 다시 구워야 한다.
+
+## 궤적 다시 굽기
+
+`TrayGeometry`나 주사위 물성을 바꿨을 때만 필요하다.
+
+1. 스킴 `TrajectoryBaker`로 macOS 앱을 실행한다.
+2. 굽기가 끝나면 출력된 `trajectories.bin`을 `App/Resources/`에 덮어쓴다.
+3. `TrajectoryLibraryTests`와 `StageProjectionTests`를 돌려 개수·다양성·화면 안 배치를 확인한다.
+
+## 저장소가 iCloud 안에 있다
+
+iCloud Drive가 동기화 충돌 시 `Info 2.plist`처럼 " 2." 접미사 사본을 만든다.
+`.gitignore`가 소스·설정 확장자에 대해 이를 무시하지만, `YachtDice 2.xcodeproj` 같은 디렉터리는
+직접 지워야 한다. 프로젝트는 언제든 `xcodegen generate`로 다시 만들 수 있다.
