@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import YachtCore
+import YachtBot
 import DiceTrajectory
 @testable import YachtDice
 
@@ -178,6 +179,124 @@ struct GameSessionTests {
 
     final class LogRecorder: @unchecked Sendable {
         private(set) var count = 0
-        func record(_ log: MatchLog) { count += 1 }
+        func record(_ record: MatchRecord) { count += 1 }
+    }
+}
+
+@Suite("게임 세션 - 참가자")
+@MainActor
+struct GameSessionParticipantTests {
+
+    private struct ConstantDriver: MatchDriver {
+        let face: Int
+        func requestRoll(count: Int) async throws -> [Int] { Array(repeating: face, count: count) }
+        func submit(_ event: Event) async throws {}
+        var incoming: AsyncStream<Event> { AsyncStream { $0.finish() } }
+    }
+
+    private final class Box: @unchecked Sendable {
+        var value: MatchRecord?
+    }
+
+    private func makeSession(mode: GameMode, face: Int = 3) throws -> GameSession {
+        let session = GameSession(driver: ConstantDriver(face: face),
+                                  stage: DiceStage(library: try TrajectoryLibrary.bundled()),
+                                  record: MatchRecord(mode: mode))
+        session.reduceMotion = true
+        return session
+    }
+
+    @Test("혼자 연습은 항상 내 차례이고 핸드오프가 없다")
+    func 혼자() async throws {
+        let session = try makeSession(mode: .solo)
+        #expect(session.isLocalTurn)
+        await session.send(.roll)
+        await session.send(.commit(.threes))
+        #expect(session.isLocalTurn)
+        #expect(!session.pendingHandoff)
+    }
+
+    @Test("내 턴이 끝나면 봇이 자기 턴을 끝까지 두고 차례가 돌아온다")
+    func 봇_턴() async throws {
+        let session = try makeSession(mode: .versusBot(.normal))
+        #expect(session.isLocalTurn)
+        await session.send(.roll)
+        await session.send(.commit(.threes))
+        #expect(!session.isLocalTurn, "봇 차례인데 입력이 열려 있다")
+
+        await session.waitForBotTurn()
+        #expect(session.visibleState.currentPlayer == 0)
+        #expect(session.visibleState.turnIndex == 2)
+        #expect(session.visibleState.scorecards[1].openCategories.count == 11, "봇이 기록하지 않았다")
+        #expect(session.isLocalTurn)
+    }
+
+    @Test("봇 차례에는 send가 거부된다")
+    func 봇_차례_잠금() async throws {
+        let session = try makeSession(mode: .versusBot(.easy))
+        await session.send(.roll)
+        await session.send(.commit(.threes))
+        let before = session.visibleState
+        await session.send(.roll)   // 봇 차례에 끼어들기
+        #expect(session.visibleState.currentPlayer == before.currentPlayer)
+        await session.waitForBotTurn()
+    }
+
+    @Test("패스앤플레이는 사람 차례가 바뀔 때 핸드오프를 기다린다")
+    func 핸드오프() async throws {
+        let session = try makeSession(mode: .passAndPlay(names: ["A", "B"]))
+        await session.send(.roll)
+        await session.send(.commit(.threes))
+        #expect(session.pendingHandoff)
+        #expect(!session.isLocalTurn)
+        #expect(session.currentParticipant == .human(name: "B"))
+
+        await session.send(.roll)
+        #expect(session.visibleState.rollsRemaining == 3, "핸드오프 중에 굴려졌다")
+
+        session.acknowledgeHandoff()
+        #expect(session.isLocalTurn)
+        await session.send(.roll)
+        #expect(session.visibleState.rollsRemaining == 2)
+    }
+
+    @Test("4인 패스앤플레이 12턴 완주")
+    func 사인_완주() async throws {
+        let session = try makeSession(mode: .passAndPlay(names: ["A", "B", "C", "D"]))
+        for category in ScoreCategory.allCases {
+            for _ in 0..<4 {
+                if session.pendingHandoff { session.acknowledgeHandoff() }
+                await session.send(.roll)
+                await session.send(.commit(category))
+            }
+        }
+        #expect(session.visibleState.phase == .finished)
+        let allComplete = session.visibleState.scorecards.allSatisfy { $0.isComplete }
+        #expect(allComplete)
+    }
+
+    @Test("복원한 판의 현재 차례가 봇이면 바로 봇이 둔다")
+    func 복원_봇_차례() async throws {
+        var record = MatchRecord(mode: .versusBot(.normal))
+        record.log.append(.rolled([3, 3, 3, 3, 3]))
+        record.log.append(.committed(.threes, 15))
+        record.log.append(.turnAdvanced)
+        let session = GameSession(driver: ConstantDriver(face: 2),
+                                  stage: DiceStage(library: try TrajectoryLibrary.bundled()),
+                                  record: record)
+        session.reduceMotion = true
+        session.resumeTurnOwner()
+        await session.waitForBotTurn()
+        #expect(session.visibleState.currentPlayer == 0)
+    }
+
+    @Test("onLogChanged는 모드를 담은 기록을 준다")
+    func 저장_콜백() async throws {
+        let session = try makeSession(mode: .versusBot(.hard))
+        let saved = Box()
+        session.onLogChanged = { saved.value = $0 }
+        await session.send(.roll)
+        #expect(saved.value?.mode == .versusBot(.hard))
+        #expect(saved.value?.log.events.count == 1)
     }
 }

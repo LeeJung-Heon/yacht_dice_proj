@@ -22,17 +22,17 @@ final class AppContainer {
 
         do {
             let stage = DiceStage(library: try TrajectoryLibrary.bundled())
-            let restored = store.load()?.log
+            let restored = store.load()
             let session = GameSession(driver: LocalDriver(), stage: stage,
-                                      log: restored ?? MatchLog(playerCount: 1))
-            session.onLogChanged = { log in
-                try? store.save(MatchRecord(mode: .solo, participants: GameMode.solo.participants, log: log))
-            }
+                                      record: restored ?? MatchRecord(mode: .solo))
+            session.onLogChanged = { record in try? store.save(record) }
 
             // 복원한 판이면 주사위를 마지막 상태로 앉힌다. 그림은 즉시 확정되지만
             // roll()이 async라 한 틱 뒤에 실행된다 — 첫 입력보다는 항상 먼저다.
-            if let restored, restored.state.phase == .rolling {
-                Self.seatRestoredDice(restored.state, on: stage)
+            if let restored, restored.log.state.phase == .rolling {
+                Self.seatRestoredDice(restored.log.state, on: stage, then: session)
+            } else {
+                session.resumeTurnOwner()
             }
             status = .ready(session, stage)
         } catch {
@@ -40,11 +40,12 @@ final class AppContainer {
         }
     }
 
-    private static func seatRestoredDice(_ state: GameState, on stage: DiceStage) {
+    private static func seatRestoredDice(_ state: GameState, on stage: DiceStage, then session: GameSession) {
         Task { @MainActor in
             _ = await stage.roll(values: state.dice, slots: Array(0..<YachtCore.diceCount),
                                  direction: .center, skipAnimation: true)
             stage.placeHeld(state.held.sorted(), values: state.dice)
+            session.resumeTurnOwner()
         }
     }
 }
