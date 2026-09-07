@@ -5,6 +5,7 @@ import DiceTrajectory
 struct GameScreen: View {
     let session: GameSession
     let stage: DiceStage
+    var onReturnToMenu: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -12,15 +13,18 @@ struct GameScreen: View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 header
+                if session.participants.count > 1 {
+                    PlayerStrip(session: session).padding(.bottom, 6)
+                }
                 DiceStageView(stage: stage) { slot in
                     Task { await session.send(.toggleHold(slot)) }
                 }
-                    .frame(height: geometry.size.height * 0.42)
-                    .contentShape(Rectangle())
-                    .gesture(throwGesture)
+                .frame(height: geometry.size.height * (session.participants.count > 1 ? 0.38 : 0.42))
+                .contentShape(Rectangle())
+                .gesture(throwGesture)
                 Group {
                     if session.visibleState.phase == .finished {
-                        GameOverBar(session: session)
+                        GameOverBar(session: session, onReturnToMenu: onReturnToMenu)
                     } else {
                         ActionBarView(session: session)
                     }
@@ -31,6 +35,13 @@ struct GameScreen: View {
                     ScoreboardView(session: session)
                 }
             }
+            .overlay {
+                if session.pendingHandoff {
+                    HandoffOverlay(playerName: session.currentParticipant.displayName) {
+                        session.acknowledgeHandoff()
+                    }
+                }
+            }
         }
         .onChange(of: reduceMotion, initial: true) { _, newValue in
             session.reduceMotion = newValue
@@ -38,7 +49,14 @@ struct GameScreen: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 12) {
+            Button {
+                onReturnToMenu()
+            } label: {
+                Image(systemName: "chevron.left").font(.headline)
+            }
+            .accessibilityIdentifier("header.menu")
+            .accessibilityLabel("메뉴로")
             // combine을 이 Group에만 걸어서 header.turn의 label이 항상 턴
             // 텍스트가 되게 한다. 바깥 HStack 전체에 걸면 "게임 종료"까지
             // 합쳐져서 두 상태를 구분할 라벨도, 별도로 찾을 static text도
@@ -54,6 +72,12 @@ struct GameScreen: View {
             Spacer()
             if session.visibleState.phase == .finished {
                 Text("게임 종료").font(.headline).foregroundStyle(.green)
+            } else if case .bot = session.currentParticipant {
+                Text("컴퓨터가 생각 중").font(.subheadline).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("header.status")
+            } else if case .remote = session.currentParticipant {
+                Text("상대 차례").font(.subheadline).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("header.status")
             }
         }
         .padding(.horizontal, 16)

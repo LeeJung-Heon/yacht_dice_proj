@@ -11,7 +11,7 @@ struct YachtDiceApp: App {
                 MenuScreen(container: container)
             case .playing(let session):
                 if let stage = container.currentStage {
-                    GameScreen(session: session, stage: stage)
+                    GameScreen(session: session, stage: stage, onReturnToMenu: { container.returnToMenu() })
                 }
             case .failed(let message):
                 ContentUnavailableView("시작할 수 없습니다", systemImage: "exclamationmark.triangle",

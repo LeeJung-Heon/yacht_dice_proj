@@ -51,7 +51,7 @@ struct ScoreboardView: View {
             .padding(.vertical, 5)
         }
         .buttonStyle(.plain)
-        .disabled(recorded != nil || !state.allows(.commit(category)) || session.isBusy)
+        .disabled(recorded != nil || !state.allows(.commit(category)) || session.isBusy || !session.isLocalTurn)
         .accessibilityIdentifier("scoreboard.row.\(category.rawValue)")
         .accessibilityLabel(accessibilityLabel(for: category, recorded: recorded, preview: preview))
         .accessibilityHint(recorded == nil ? category.accessibilityDescription : "")

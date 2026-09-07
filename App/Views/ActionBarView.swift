@@ -47,7 +47,7 @@ struct ActionBarView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 .buttonStyle(.plain)
-                .disabled(!state.allows(.toggleHold(index)) || session.isBusy)
+                .disabled(!state.allows(.toggleHold(index)) || session.isBusy || !session.isLocalTurn)
                 .accessibilityIdentifier("action.die.\(index)")
                 .accessibilityLabel(value == 0 ? "주사위 \(index + 1), 아직 안 굴림"
                                                : "주사위 \(index + 1), \(value)")
@@ -80,7 +80,7 @@ struct ActionBarView: View {
             .padding(.vertical, 12)
         }
         .buttonStyle(.borderedProminent)
-        .disabled(!state.allows(.roll) || session.isBusy)
+        .disabled(!state.allows(.roll) || session.isBusy || !session.isLocalTurn)
         .accessibilityIdentifier("action.roll")
         .accessibilityLabel("주사위 굴리기, \(state.rollsRemaining)회 남음")
     }
