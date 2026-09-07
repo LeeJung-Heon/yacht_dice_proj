@@ -31,6 +31,8 @@ targets:
         # [1, 2]가 되고, Release 빌드가 "모든 방향을 지원해야 한다"고 경고한다.
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Game Center 턴제 매치. 포털에서 앱 ID에 Game Center를 켜야 실기기에서 서명된다.
+        CODE_SIGN_ENTITLEMENTS: App/YachtDice.entitlements
     info:
       path: App/Info.plist
       properties:
@@ -42,6 +44,8 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        # 온라인 대전을 위한 Game Center 표시
+        GKGameCenterBadgingDisabled: false
     dependencies:
       - package: YachtCore
       - package: DiceTrajectory

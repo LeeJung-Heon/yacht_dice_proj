@@ -60,10 +60,11 @@ struct MenuScreen: View {
                     }
                     .accessibilityIdentifier("menu.local")
 
-                    Button {} label: {
-                        Label("온라인 대전 (준비 중)", systemImage: "network")
+                    NavigationLink {
+                        OnlineMenu(container: container)
+                    } label: {
+                        Label("온라인 대전", systemImage: "network")
                     }
-                    .disabled(true)
                     .accessibilityIdentifier("menu.online")
                 }
             }

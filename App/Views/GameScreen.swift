@@ -35,6 +35,17 @@ struct GameScreen: View {
                     ScoreboardView(session: session)
                 }
             }
+            .overlay(alignment: .top) {
+                if let error = session.lastTransportError {
+                    Text(error)
+                        .font(.caption)
+                        .padding(8)
+                        .background(.red.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+                        .foregroundStyle(.white)
+                        .padding(.top, 48)
+                        .accessibilityIdentifier("online.error")
+                }
+            }
             .overlay {
                 if session.pendingHandoff {
                     HandoffOverlay(playerName: session.currentParticipant.displayName) {
