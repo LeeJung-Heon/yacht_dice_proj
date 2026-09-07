@@ -11,7 +11,8 @@ struct SurfaceTexturesTests {
         let image = try #require(SurfaceTextures.makeGrain(kind: kind, size: 64))
         #expect(image.width == 64 && image.height == 64)
         let data = try #require(image.dataProvider?.data as Data?)
-        let alphas = Set(stride(from: 3, to: data.count, by: 4).map { data[$0] })
-        #expect(alphas.count > 4, "\(kind) 결이 평평하다")
+        // 나무·가죽은 색이, 종이는 알파가 흔들려야 한다. 어느 쪽이든 픽셀이 다양해야 결이다.
+        let pixels = Set(stride(from: 0, to: data.count, by: 4).map { data[$0..<$0 + 4].map { $0 } })
+        #expect(pixels.count > 16, "\(kind) 결이 평평하다")
     }
 }

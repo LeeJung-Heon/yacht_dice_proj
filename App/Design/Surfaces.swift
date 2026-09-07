@@ -12,11 +12,11 @@ struct PaperCard: ViewModifier {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14).fill(theme.paper)
                     SurfaceTextures.paper.resizable(resizingMode: .tile)
-                        .opacity(theme.isDark ? 0.05 : 0.08)
+                        .opacity(theme.isDark ? 0.05 : 0.07)
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                     RoundedRectangle(cornerRadius: 14).strokeBorder(theme.paperLine, lineWidth: 1)
                 }
-                .shadow(color: .black.opacity(theme.isDark ? 0.5 : 0.18), radius: 8, y: 3)
+                .shadow(color: .black.opacity(theme.isDark ? 0.5 : 0.25), radius: 8, y: 3)
             }
     }
 }
@@ -28,10 +28,10 @@ struct LeatherPanel: ViewModifier {
     func body(content: Content) -> some View {
         content.background {
             ZStack {
-                theme.leather
-                SurfaceTextures.leather.resizable(resizingMode: .tile).opacity(0.12)
-                RadialGradient(colors: [.clear, .black.opacity(0.35)],
-                               center: .center, startRadius: 40, endRadius: 400)
+                SurfaceTextures.leather.resizable(resizingMode: .tile)
+                Color.black.opacity(theme.isDark ? 0.4 : 0.1)
+                LinearGradient(colors: [.black.opacity(0.25), .clear, .black.opacity(0.35)],
+                               startPoint: .top, endPoint: .bottom)
             }
         }
     }
@@ -55,6 +55,7 @@ struct BrassButton: ViewModifier {
                                                   startPoint: .top, endPoint: .bottom))
                     Capsule().strokeBorder(theme.brassInk.opacity(0.35), lineWidth: 1)
                 } else {
+                    Capsule().fill(theme.table.opacity(0.35))
                     Capsule().strokeBorder(theme.brass, lineWidth: 1.5)
                 }
             }
@@ -74,8 +75,8 @@ struct WoodBackground: View {
 
     var body: some View {
         ZStack {
-            theme.table
-            SurfaceTextures.wood.resizable(resizingMode: .tile).opacity(theme.isDark ? 0.22 : 0.3)
+            SurfaceTextures.wood.resizable(resizingMode: .tile)
+            Color.black.opacity(theme.isDark ? 0.62 : 0.28)
             RadialGradient(colors: [.clear, .black.opacity(0.45)],
                            center: .center, startRadius: 120, endRadius: 700)
         }
