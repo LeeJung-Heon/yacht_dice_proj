@@ -1,7 +1,8 @@
 # 요트 다이스 (Yacht Dice)
 
 닌텐도 『세계의 게임 대전 51』의 Yacht Dice를 레퍼런스로 삼은 iOS 네이티브 야추 다이스 게임.
-RealityKit 3D 주사위, 이벤트 소싱 규칙 엔진, 세로 화면 전용. 현재 P1(싱글 플레이) 단계다.
+RealityKit 3D 주사위, 이벤트 소싱 규칙 엔진, 세로 화면 전용.
+혼자 연습, 컴퓨터 대전(3단계), 같은 기기 2~4인까지 된다(P2). 온라인 대전(P3)은 진행 중.
 
 ## 빌드
 
@@ -43,10 +44,11 @@ SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
 | 경로 | 역할 |
 |---|---|
 | `Packages/YachtCore` | 규칙 엔진. `Intent`(하고 싶은 것)와 `Event`(확정된 사실)를 분리한 이벤트 소싱. UI·3D를 모른다. |
-| `Packages/DiceTrajectory` | 구운 궤적 자료구조, 바이너리 포맷, 회전 오프셋(정육면체 대칭군), 트레이 치수. |
+| `Packages/DiceTrajectory` | 구운 궤적 자료구조, 바이너리 포맷, 회전 오프셋(정육면체 대칭군), 트레이 치수, 궤적 검증기. |
 | `App/Game` | `GameSession`(유일한 오케스트레이터), `MatchDriver`, 진행 저장(`MatchStore`). |
 | `App/Scene3D` | RealityKit 씬. `DiceSceneBuilder`(지오메트리), `SceneMaterials`(절차적 PBR 텍스처), `SceneLighting`(조명·IBL), `DiceStage`(궤적 재생). |
-| `App/Views` | 세로 화면 UI. 점수판, 액션 바, 결과 바. |
+| `Packages/YachtBot` | 컴퓨터 상대. 난이도 3단계, 손패 기대값 전수 계산. YachtCore만 의존. |
+| `App/Views` | 세로 화면 UI. 시작 메뉴(`MenuScreen`), 참가자 띠, 점수판, 액션 바, 결과 바. |
 | `App/AppContainer.swift` | 앱 조립과 저장된 판 복원. |
 | `Tools/TrajectoryBaker` | 물리 시뮬로 궤적을 굽는 macOS 앱. 결과는 `App/Resources/trajectories.bin`. |
 | `docs/superpowers` | 설계 스펙과 구현 계획. |
@@ -69,8 +71,12 @@ SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
 
 `TrayGeometry`나 주사위 물성을 바꿨을 때만 필요하다.
 
-1. 스킴 `TrajectoryBaker`로 macOS 앱을 실행한다.
-2. 굽기가 끝나면 출력된 `trajectories.bin`을 `App/Resources/`에 덮어쓴다.
+1. 스킴 `TrajectoryBaker`를 빌드한 뒤 **Finder나 `open -a`로 앱을 띄운다.** 셸에서 바이너리를 직접 실행하거나
+   샌드박스 안에서 `open`하면 창이 생기지 않아 RealityKit 물리가 돌지 않는다 (CPU 0%로 영원히 대기).
+   진행 로그는 `open --stdout 파일 -a TrajectoryBaker.app`으로 받는다. 1200회 시도에 약 25분.
+   - `--args -dice 5`: 그 개수만 굽는다. `--args -merge 기존.bin`: 기존 아카이브 뒤에 이어 붙인다.
+     채택률이 낮은 조합(5개짜리)만 보충할 때 둘을 같이 쓴다.
+2. 굽기가 끝나면 `/private/tmp/trajectories.bin`을 `App/Resources/`에 덮어쓴다.
 3. `TrajectoryLibraryTests`와 `StageProjectionTests`를 돌려 개수·다양성·화면 안 배치를 확인한다.
 
 ## 저장소가 iCloud 안에 있다
