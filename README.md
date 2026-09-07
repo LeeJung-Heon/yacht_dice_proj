@@ -2,7 +2,7 @@
 
 닌텐도 『세계의 게임 대전 51』의 Yacht Dice를 레퍼런스로 삼은 iOS 네이티브 야추 다이스 게임.
 RealityKit 3D 주사위, 이벤트 소싱 규칙 엔진, 세로 화면 전용.
-혼자 연습, 컴퓨터 대전(3단계), 같은 기기 2~4인까지 된다(P2). 온라인 대전(P3)은 진행 중.
+혼자 연습, 컴퓨터 대전(3단계), 같은 기기 2~4인, Game Center 턴제 온라인 대전까지 된다.
 
 ## 빌드
 
@@ -49,6 +49,7 @@ SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
 | `App/Scene3D` | RealityKit 씬. `DiceSceneBuilder`(지오메트리), `SceneMaterials`(절차적 PBR 텍스처), `SceneLighting`(조명·IBL), `DiceStage`(궤적 재생). |
 | `Packages/YachtBot` | 컴퓨터 상대. 난이도 3단계, 손패 기대값 전수 계산. YachtCore만 의존. |
 | `App/Views` | 세로 화면 UI. 시작 메뉴(`MenuScreen`), 참가자 띠, 점수판, 액션 바, 결과 바. |
+| `App/Online` | Game Center 턴제 매치. `TurnTransport` 프로토콜, 메모리 전송(테스트), Game Center 어댑터, 매치메이커. GameKit은 여기서만 import한다. |
 | `App/AppContainer.swift` | 앱 조립과 저장된 판 복원. |
 | `Tools/TrajectoryBaker` | 물리 시뮬로 궤적을 굽는 macOS 앱. 결과는 `App/Resources/trajectories.bin`. |
 | `docs/superpowers` | 설계 스펙과 구현 계획. |
@@ -66,6 +67,19 @@ SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
 가죽·호두나무·주사위 눈은 `App/Scene3D/ProceduralTexture.swift`의 결정적 노이즈로 앱 시작 시 그린다.
 외부 텍스처·모델 파일이 없다. 트레이의 **보이는 모양**(모서리 라운드, 선반 패드)은 자유롭게 바꿔도 되지만,
 주사위가 닿는 면의 위치(`TrayGeometry`)는 구운 궤적과 맞물려 있으니 바꾸면 다시 구워야 한다.
+
+## 온라인 대전을 실기기에서 확인하려면
+
+코드는 시뮬레이터에서 컴파일되고 메모리 전송으로 두 세션이 한 판을 완주하는 것까지 테스트한다.
+실제 Game Center 매치는 다음이 갖춰져야 동작한다.
+
+1. Apple Developer 포털에서 앱 ID `com.leejungheon.yachtdice.YachtDice`에 **Game Center** 기능을 켠다.
+2. App Store Connect에서 앱에 Game Center를 활성화한다 (앱 레코드가 있어야 한다).
+3. 실기기 두 대에 서로 다른 Apple ID(샌드박스 테스터 가능)로 Game Center에 로그인한다.
+4. 메뉴 → 온라인 대전 → 새 매치 찾기. 친구 초대 또는 자동 매칭.
+
+매치 데이터는 `MatchLog` JSON 그대로다. 상대가 보낸 로그는 `GameState.canApply`로 검증한 뒤 재생한다.
+주사위는 각 클라이언트가 굴리므로 조작된 클라이언트의 "운 좋은 눈"은 막지 못한다 (스펙 P2/P3 §7.4).
 
 ## 궤적 다시 굽기
 
