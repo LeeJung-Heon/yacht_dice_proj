@@ -31,7 +31,13 @@ final class BakerModel {
             ([t, inner.y, inner.z], [ (inner.x + t) / 2, inner.y / 2, 0]),
             ([t, inner.y, inner.z], [-(inner.x + t) / 2, inner.y / 2, 0]),
         ]
-        for wall in walls {
+        // keep 선반도 물리 장애물이다. 앱은 이 띠(shelfFrontZ 뒤)에 선반을 그리므로,
+        // 여기 없이 구우면 주사위가 선반 안쪽에서 멈춰 나무 턱에 파묻힌 채로 보인다.
+        let shelfDepth = TrayGeometry.shelfFrontZ - TrayGeometry.shelfBackZ
+        let shelf: (size: SIMD3<Float>, offset: SIMD3<Float>) = (
+            [inner.x, TrayGeometry.shelfTop, shelfDepth],
+            [0, TrayGeometry.shelfTop / 2, TrayGeometry.shelfDieZ])
+        for wall in walls + [shelf] {
             let entity = ModelEntity(
                 mesh: .generateBox(size: wall.size),
                 materials: [SimpleMaterial(color: .brown, isMetallic: false)]
@@ -58,7 +64,7 @@ final class BakerModel {
             // 되고 주사위가 영원히 돈다. 반드시 형상에서 계산되는 이 생성자를 쓴다 (스파이크 실측).
             entity.components.set(PhysicsBodyComponent(
                 shapes: [shape], mass: 0.005,
-                material: .generate(friction: 0.55, restitution: 0.30),
+                material: .generate(friction: 0.45, restitution: 0.32),
                 mode: .dynamic))
             entity.components.set(PhysicsMotionComponent())
             root.addChild(entity)
@@ -112,11 +118,21 @@ final class BakerModel {
             return .failure("\(BakePlan.maxFrames)프레임 안에 멈추지 않음")
         }
 
+        // 정착 판정에 쓴 대기 프레임은 재생할 가치가 없다. 멈춘 뒤 1초를 가만히 보여주면
+        // "던진" 느낌이 아니라 "떨어뜨리고 기다리는" 느낌이 된다. 마지막 움직임 뒤 몇 프레임만 남긴다.
+        frames = Self.trimIdleTail(frames, keep: BakePlan.tailFrames)
+        collisions = collisions.filter { Int($0.frame) < frames.count }
+
         // 정지 자세는 물리가 만든 그대로 둔다. 축정렬로 스냅하면 안 된다 —
         // 바닥에 누운 주사위는 yaw가 연속적으로 자유로워서 최대 45° 홱 돌아간다 (스펙 §7.3).
         // 기록하는 것은 "위를 향한 눈"뿐이고, 회전 오프셋은 그 값에만 의존한다.
         var restUpFaces: [UInt8] = []
         for die in 0..<dieCount {
+            // 선반 위에 올라앉아 멈춘 주사위는 keep한 것과 구분이 안 된다
+            let restZ = frames[frames.count - 1][die].position.z
+            guard restZ - TrayGeometry.dieSize / 2 > TrayGeometry.shelfFrontZ else {
+                return .failure("선반 위에서 멈춤 (z=\(String(format: "%.3f", restZ)))")
+            }
             let resting = frames[frames.count - 1][die].orientation
             let tiltDegrees = DieFace.upFaceTiltRadians(for: resting) * 180 / .pi
             guard tiltDegrees <= BakePlan.maxUpFaceTiltDegrees else {
@@ -133,36 +149,78 @@ final class BakerModel {
             in: trajectory, trayInner: TrayGeometry.trayInner, dieSize: TrayGeometry.dieSize)
         guard problems.isEmpty else { return .failure(problems[0]) }
 
+        // 화면에 그리는 벽(0.03)보다 위에서 물리 벽(0.12)에 부딪히면 허공에서 튕기는 것처럼 보인다.
+        let ghostHits = TrajectoryValidator.wallContactsAboveVisibleWall(
+            in: trajectory, trayInner: TrayGeometry.trayInner, dieSize: TrayGeometry.dieSize,
+            visibleWallHeight: TrayGeometry.visualWallHeight)
+        guard ghostHits == 0 else { return .failure("보이는 벽 위에서 벽에 닿음 (\(ghostHits)프레임)") }
+
+        let duration = Float(frames.count) / Float(BakePlan.frameRate)
+        guard duration >= BakePlan.minDurationSeconds else {
+            return .failure("너무 짧음 (\(String(format: "%.2f", duration))초)")
+        }
+
         return .success(trajectory)
     }
 
-    /// 던지기 시작 높이. TrajectoryValidator의 트레이 상한(trayInner.y + dieSize = 0.136)보다
-    /// 낮아야 한다 — 예전에 0.16에서 던졌더니 프레임 0부터 상한을 넘어 거의 모든 궤적이
-    /// 즉시 기각됐다 (실측: 40개 중 39개 기각, "트레이를 벗어났다").
-    /// 물리 벽 높이(0.12) 바로 아래에서 던진다. 화면에 그리는 벽은 이보다 훨씬 낮지만
-    /// (TrayGeometry.visualWallHeight), 궤적은 여전히 0.12 상자 안에서 굽는다.
-    private static let throwHeight: Float = 0.10
-
-    private func resetDice(dieCount: Int, direction: ThrowDirection) {
-        let lateral: Float = switch direction {
-        case .left: -0.35
-        case .center: 0
-        case .right: 0.35
+    /// 마지막으로 눈에 띄게 움직인 프레임 뒤로 `keep`개만 남긴다.
+    /// 마지막 프레임은 정착 판정을 통과한 자세이므로 잘라내도 정지 자세는 그대로다 —
+    /// 잘린 프레임들은 전부 그 자세와 settleThreshold 이내로 같다.
+    static func trimIdleTail(_ frames: [[DiePose]], keep: Int) -> [[DiePose]] {
+        guard frames.count > 1 else { return frames }
+        let final = frames[frames.count - 1]
+        var lastMoving = 0
+        for (index, frame) in frames.enumerated() {
+            for (die, pose) in frame.enumerated() {
+                let moved = simd_length(pose.position - final[die].position) > 0.0004
+                let turned = abs(simd_dot(pose.orientation.vector, final[die].orientation.vector)) < cos(0.5 * .pi / 180 / 2)
+                if moved || turned { lastMoving = index }
+            }
         }
+        let end = min(frames.count, lastMoving + 1 + keep)
+        // 잘린 뒤에도 마지막 프레임은 원래의 정지 자세여야 한다
+        return Array(frames[0..<(end - 1)]) + [final]
+    }
+
+    /// 던지기 시작 높이. 손에서 놓는 높이다 — 화면에 그리는 벽(0.03)보다 조금 위, 물리 벽(0.12)보다는
+    /// 훨씬 아래. 예전처럼 0.10에서 거의 수직으로 떨어뜨리면 "던진" 게 아니라 "떨어뜨린" 것처럼 보였고,
+    /// 0.16에서는 TrajectoryValidator의 상한(0.136)을 넘어 즉시 기각됐다.
+    private static let throwHeight: Float = 0.045
+
+    /// 플레이어 쪽(앞, +z) 가장자리에서 트레이 안쪽으로 던진다. 카메라가 앞에서 보므로
+    /// 주사위가 손에서 떠나 멀어지며 구르는 것처럼 읽힌다. 예전엔 뒤쪽 벽에서 카메라 쪽으로 던져
+    /// 항상 화면 아래 앞벽에 몰려 멈췄다.
+    private func resetDice(dieCount: Int, direction: ThrowDirection) {
+        // 방향은 "어느 쪽으로 던지는가". 왼쪽으로 쓸어넘기면 주사위가 왼쪽으로 간다.
+        let lateral: Float = switch direction {
+        case .left: -0.45
+        case .center: 0
+        case .right: 0.45
+        }
+        let count = Float(dieCount)
         for (index, entity) in dice.enumerated() {
             entity.isEnabled = index < dieCount
             guard index < dieCount else { continue }
+            // 한 손에 쥔 것처럼 앞쪽 가운데에 모아 놓는다. 겹치지 않을 만큼만 띄운다.
             entity.position = [
-                Float(index) * TrayGeometry.dieSize * 1.5 - 0.03,
-                Self.throwHeight,
-                -TrayGeometry.trayInner.z / 2 + 0.02,
+                (Float(index) - (count - 1) / 2) * TrayGeometry.dieSize * 1.35 + .random(in: -0.003...0.003),
+                Self.throwHeight + .random(in: 0...0.012),
+                TrayGeometry.trayInner.z / 2 - 0.03 + .random(in: -0.008...0.008),
             ]
             entity.orientation = simd_normalize(simd_quatf(
                 angle: .random(in: 0...(2 * .pi)),
                 axis: simd_normalize(SIMD3<Float>.random(in: -1...1))))
             var motion = PhysicsMotionComponent()
-            motion.linearVelocity = [lateral + .random(in: -0.1...0.1), -0.5, .random(in: 0.5...0.9)]
-            motion.angularVelocity = SIMD3(.random(in: -25...25), .random(in: -25...25), .random(in: -25...25))
+            // 뒤로(-z), 살짝 위로. 앞쪽 가장자리에서 0.045 높이로 던지면 약 0.16초 뒤 바닥에 닿으므로
+            // 앞 속도 0.55~0.95면 첫 착지가 트레이 가운데(z ≈ 0)가 된다. 이보다 빠르면 공중에서
+            // 뒷벽까지 날아가 보이는 벽 위에서 부딪히고(기각), 벽에 맞자마자 멈춰 너무 짧아진다(기각).
+            // 구르는 시간은 회전이 만든다.
+            motion.linearVelocity = [
+                lateral * 0.6 + .random(in: -0.12...0.12),
+                .random(in: 0.08...0.32),
+                -.random(in: 0.5...0.85),
+            ]
+            motion.angularVelocity = SIMD3(.random(in: -45...45), .random(in: -45...45), .random(in: -45...45))
             entity.components.set(motion)
         }
     }

@@ -44,6 +44,10 @@ final class DiceStage {
 
     // MARK: - 재생
 
+    /// 리드인 길이 (프레임, 60fps 기준 0.2초)와 들어 올리는 높이.
+    static let leadInFrames = 12
+    static let leadInLift: Float = 0.03
+
     /// - Parameters:
     ///   - values: 나와야 할 눈. slots와 같은 길이·순서다.
     ///   - slots: 굴릴 주사위 슬롯 (keep되지 않은 것들).
@@ -77,6 +81,25 @@ final class DiceStage {
 
         let frameDuration = Duration.seconds(1.0 / Double(trajectory.frameRate))
         var clock = ContinuousClock.now
+
+        // 리드인: 지금 있는 자리에서 궤적의 첫 자세까지 집어 올리듯 옮긴다.
+        // 이게 없으면 주사위가 바닥에서 사라져 앞쪽 공중에 순간이동한 뒤 던져진다.
+        let starts = slots.map { dice[$0].position }
+        let startOrientations = slots.map { dice[$0].orientation }
+        for step in 1...Self.leadInFrames {
+            let t = Float(step) / Float(Self.leadInFrames)
+            let eased = t * t * (3 - 2 * t)
+            for (lane, slot) in slots.enumerated() {
+                let target = trajectory.posed(die: lane, frame: 0, offset: offsets[lane])
+                var position = simd_mix(starts[lane], target.position, SIMD3(repeating: eased))
+                position.y += Self.leadInLift * 4 * eased * (1 - eased)   // 포물선으로 살짝 들어 올린다
+                dice[slot].position = position
+                dice[slot].orientation = simd_slerp(startOrientations[lane], target.orientation, eased)
+            }
+            clock += frameDuration
+            try? await Task.sleep(until: clock, clock: .continuous)
+        }
+
         for frame in 0..<trajectory.frameCount {
             applyFrame(frame, of: trajectory, slots: slots, offsets: offsets)
             clock += frameDuration

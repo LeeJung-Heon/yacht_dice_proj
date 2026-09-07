@@ -63,4 +63,28 @@ public enum TrajectoryValidator {
 
         return problems
     }
+
+    /// 눈에 보이는 벽 높이보다 위에서 벽에 닿은 프레임 수.
+    ///
+    /// 물리 벽은 `trayInner.y`(0.12)까지 있지만 화면에는 `visibleWallHeight`(0.03)까지만 그린다.
+    /// 그 사이 높이에서 벽에 부딪히면 주사위가 허공에서 튕기는 것처럼 보인다.
+    /// 던지는 도중 벽 근처를 높이 지나가는 것 자체는 괜찮다 — 벽에 **닿을 만큼** 가까운 프레임만 센다.
+    public static func wallContactsAboveVisibleWall(in trajectory: Trajectory,
+                                                    trayInner: SIMD3<Float>,
+                                                    dieSize: Float,
+                                                    visibleWallHeight: Float) -> Int {
+        let reach = dieSize * 0.5 * 1.42 + 0.002   // 모서리로 닿는 경우까지 (대각 반지름)
+        let nearX = trayInner.x / 2 - reach
+        let nearZ = trayInner.z / 2 - reach
+        var count = 0
+        for frame in trajectory.frames {
+            for pose in frame {
+                let p = pose.position
+                let touchingWall = abs(p.x) > nearX || abs(p.z) > nearZ
+                let bottom = p.y - dieSize / 2
+                if touchingWall && bottom > visibleWallHeight { count += 1 }
+            }
+        }
+        return count
+    }
 }

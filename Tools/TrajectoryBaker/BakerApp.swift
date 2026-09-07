@@ -60,6 +60,17 @@ struct BakerView: View {
         model.isRunning = true
         model.result = BakeResult()
         var nextID: UInt16 = 0
+        if let source = BakePlan.mergeSource {
+            do {
+                let existing = try TrajectoryArchive.decode(try Data(contentsOf: source))
+                model.result.accepted = existing
+                nextID = UInt16(existing.count)
+                print("병합: \(source.path)에서 \(existing.count)개를 먼저 읽었다")
+            } catch {
+                print("병합 실패: \(error)")
+                exit(1)
+            }
+        }
 
         for combination in BakePlan.combinations {
             // 25분짜리 헤드리스 실행을 셸에서 폴링해야 하므로 조합이 바뀔 때마다
