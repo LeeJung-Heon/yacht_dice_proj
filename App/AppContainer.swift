@@ -62,24 +62,40 @@ final class AppContainer {
     /// Game Center 매치로 게임을 시작하거나 이어간다. 진행 상태의 원본은 매치 데이터라 로컬에 저장하지 않는다.
     func startOnlineMatch(_ match: GKTurnBasedMatch) {
         let players = match.participants.map { SeatPlayer(id: $0.player?.gamePlayerID, name: $0.player?.displayName) }
-        let participants = seatParticipants(localID: gameCenter.localPlayerID, players: players)
+        _ = openOnlineMatch(matchID: match.matchID, localID: gameCenter.localPlayerID, players: players,
+                            matchData: match.matchData,
+                            transport: GameCenterTurnTransport(match: match, service: gameCenter))
+    }
+
+    /// GameKit 객체 없이 테스트할 수 있는 핵심. 성공하면 참.
+    ///
+    /// 이미 같은 매치를 플레이 중이면(알림으로 앱이 다시 열린 경우) 세션을 새로 만들지 않는다 —
+    /// 새 로그는 transport 스트림으로 들어오고 있는 세션이 재생한다.
+    @discardableResult
+    func openOnlineMatch(matchID: String, localID: String, players: [SeatPlayer],
+                         matchData: Data?, transport: any TurnTransport) -> Bool {
+        if case .playing(let session) = status, session.record.mode == .online(matchID: matchID) {
+            return true
+        }
+        let participants = seatParticipants(localID: localID, players: players)
         guard participants.contains(where: \.isHuman) else {
             onlineError = "이 매치에 내 자리가 없습니다"
-            return
+            return false
         }
         let log: MatchLog
-        if let data = match.matchData, !data.isEmpty {
+        if let data = matchData, !data.isEmpty {
             guard let decoded = try? MatchLog.decoded(from: data), decoded.playerCount == participants.count else {
                 onlineError = "매치 데이터를 읽을 수 없습니다"
-                return
+                return false
             }
             log = decoded
         } else {
             log = MatchLog(playerCount: participants.count)
         }
         onlineError = nil
-        let record = MatchRecord(mode: .online(matchID: match.matchID), participants: participants, log: log)
-        launch(record, transport: GameCenterTurnTransport(match: match, service: gameCenter))
+        let record = MatchRecord(mode: .online(matchID: matchID), participants: participants, log: log)
+        launch(record, transport: transport)
+        return true
     }
 
     private func launch(_ record: MatchRecord, transport: (any TurnTransport)? = nil) {
