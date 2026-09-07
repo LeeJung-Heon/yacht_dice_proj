@@ -35,12 +35,22 @@ final class GameSession {
 
     private var botTask: Task<Void, Never>?
 
-    init(driver: any MatchDriver, stage: DiceStage, record: MatchRecord) {
+    // MARK: 온라인
+    private let transport: (any TurnTransport)?
+    private var listenTask: Task<Void, Never>?
+    /// 도착한 로그를 재생 중인 Task. 재생은 굴림마다 3D를 기다리므로 순서를 지켜야 한다.
+    private var replayTask: Task<Void, Never>?
+    /// 상대가 보낸 로그를 받아들일 수 없었을 때의 이유. 화면에 배너로 보인다.
+    private(set) var lastTransportError: String?
+
+    init(driver: any MatchDriver, stage: DiceStage, record: MatchRecord,
+         transport: (any TurnTransport)? = nil) {
         precondition(record.participants.count == record.log.playerCount,
                      "참가자 \(record.participants.count)명과 로그의 \(record.log.playerCount)명이 다르다")
         self.driver = driver
         self.stage = stage
         self.record = record
+        self.transport = transport
         self.visibleState = record.log.state
     }
 
@@ -79,6 +89,34 @@ final class GameSession {
 
     func waitForBotTurn() async {
         await botTask?.value
+    }
+
+    /// 원격 로그를 받아 재생하는 루프를 시작한다. transport가 있을 때 AppContainer가 부른다.
+    func startListening() {
+        guard let transport, listenTask == nil else { return }
+        listenTask = Task { [weak self] in
+            for await log in transport.incomingLogs {
+                guard let self else { return }
+                let previous = replayTask
+                replayTask = Task { @MainActor in
+                    await previous?.value
+                    await self.replay(remote: log)
+                }
+            }
+        }
+    }
+
+    /// 테스트용: 도착한 로그를 전부 재생할 때까지 기다린다.
+    /// 로그가 아직 도착하지 않았을 수 있으므로 잠깐(최대 2초) 기다려 본다.
+    func waitForIncoming() async {
+        let before = record.log.events.count
+        let deadline = ContinuousClock.now + .seconds(2)
+        while replayTask == nil || record.log.events.count == before {
+            if ContinuousClock.now > deadline || lastTransportError != nil { break }
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        await replayTask?.value
     }
 
     /// 끝난 판을 접고 같은 모드로 새 판을 시작한다.
@@ -134,7 +172,62 @@ final class GameSession {
                 stage.reset()
                 scheduleTurnOwner(announceHandoff: true)
             }
+            await publishTurnIfNeeded()
         }
+    }
+
+    /// 내 턴이 끝나 원격 좌석에게 넘어갔거나 게임이 끝났으면 로그를 올린다.
+    private func publishTurnIfNeeded() async {
+        guard let transport else { return }
+        if visibleState.phase == .finished {
+            try? await transport.endMatch(log: record.log, totals: visibleState.scorecards.map(\.total))
+        } else if case .remote = currentParticipant {
+            try? await transport.endTurn(log: record.log)
+        }
+    }
+
+    /// 상대가 보낸 로그에서 내가 모르는 이벤트만 검증하며 재생한다.
+    /// 굴림은 3D로 보여주고, 고정·기록은 즉시 적용한다.
+    private func replay(remote log: MatchLog) async {
+        let mine = record.log.events
+        guard log.playerCount == record.log.playerCount,
+              log.events.count > mine.count,
+              Array(log.events.prefix(mine.count)) == mine
+        else {
+            if log.events.count > mine.count { lastTransportError = "상대의 기록이 내 기록과 어긋난다" }
+            return
+        }
+        for event in log.events.dropFirst(mine.count) {
+            guard visibleState.canApply(event) else {
+                lastTransportError = "상대가 보낸 이벤트가 규칙에 맞지 않는다: \(event)"
+                return
+            }
+            isBusy = true
+            switch event {
+            case .rolled(let values):
+                let slots = visibleState.rollableIndices
+                _ = await stage.roll(values: values, slots: slots,
+                                     direction: ThrowDirection.allCases.randomElement() ?? .center,
+                                     skipAnimation: reduceMotion)
+                record.log.append(event)
+                visibleState = visibleState.applying(event)
+            case .holdToggled:
+                record.log.append(event)
+                visibleState = visibleState.applying(event)
+                stage.placeHeld(visibleState.held.sorted(), values: visibleState.dice)
+            case .committed, .gameEnded:
+                record.log.append(event)
+                visibleState = visibleState.applying(event)
+            case .turnAdvanced:
+                record.log.append(event)
+                visibleState = visibleState.applying(event)
+                stage.reset()
+            }
+            isBusy = false
+        }
+        lastTransportError = nil
+        scheduleTurnOwner(announceHandoff: false)
+        onLogChanged?(record)
     }
 
     /// 새 차례의 주인에 따라 다음 일을 정한다.
