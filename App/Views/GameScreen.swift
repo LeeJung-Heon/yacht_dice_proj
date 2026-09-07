@@ -12,7 +12,9 @@ struct GameScreen: View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 header
-                DiceStageView(stage: stage)
+                DiceStageView(stage: stage) { slot in
+                    Task { await session.send(.toggleHold(slot)) }
+                }
                     .frame(height: geometry.size.height * 0.42)
                     .contentShape(Rectangle())
                     .gesture(throwGesture)

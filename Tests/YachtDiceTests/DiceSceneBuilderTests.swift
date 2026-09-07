@@ -41,3 +41,20 @@ struct DiceSceneBuildCostTests {
         #expect(elapsed < .seconds(2), "씬 조립에 \(elapsed) 걸렸다")
     }
 }
+
+@Suite("씬 구성 - 탭 히트테스트")
+struct DiceHitTestTests {
+    @Test("주사위 다섯 개가 전부 탭 대상이고, 엔티티에서 슬롯을 되찾는다")
+    @MainActor
+    func 히트테스트_컴포넌트() {
+        let root = DiceSceneBuilder.makeRoot()
+        let dice = DiceSceneBuilder.dice(in: root)
+        #expect(dice.count == 5)
+        for (slot, die) in dice.enumerated() {
+            #expect(die.components[InputTargetComponent.self] != nil, "die\(slot)에 InputTargetComponent가 없다")
+            #expect(die.components[CollisionComponent.self] != nil, "die\(slot)에 히트테스트용 CollisionComponent가 없다")
+            #expect(DiceSceneBuilder.slot(of: die) == slot)
+        }
+        #expect(DiceSceneBuilder.slot(of: root) == nil)
+    }
+}

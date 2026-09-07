@@ -33,6 +33,13 @@ enum DiceSceneBuilder {
         (0..<5).compactMap { root.findEntity(named: "die\($0)") as? ModelEntity }
     }
 
+    /// 탭 히트테스트가 돌려준 엔티티에서 주사위 슬롯을 찾는다. 주사위가 아니면 nil.
+    static func slot(of entity: Entity) -> Int? {
+        guard entity.name.hasPrefix("die"), let slot = Int(entity.name.dropFirst(3)),
+              (0..<5).contains(slot) else { return nil }
+        return slot
+    }
+
     static func makeCamera() -> Entity {
         let camera = Entity()
         var component = PerspectiveCameraComponent()
@@ -154,6 +161,10 @@ enum DiceSceneBuilder {
             entity.position = restingPosition(slot: index)
             // 바닥과 닿는 자리에 부드러운 접촉 그림자. 이게 없으면 주사위가 바닥 위에 떠 보인다.
             entity.components.set(GroundingShadowComponent(castsShadow: true))
+            // 탭으로 keep하기 위한 히트테스트. 물리가 아니라 입력용 충돌 형상이다.
+            entity.components.set(InputTargetComponent())
+            entity.components.set(CollisionComponent(
+                shapes: [.generateBox(size: SIMD3(repeating: TrayGeometry.dieSize))]))
             return entity
         }
     }
