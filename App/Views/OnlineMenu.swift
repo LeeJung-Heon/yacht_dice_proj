@@ -199,9 +199,10 @@ struct OnlineMenu: View {
         waitTask?.cancel()
         let client = service.client
         waitTask = Task {
-            let channel = client.channel("wait-\(room.id.uuidString)")
+            let idText = room.id.uuidString.lowercased()
+            let channel = client.channel("wait-\(idText)")
             let updates = channel.postgresChange(UpdateAction.self, schema: "public", table: "matches",
-                                                 filter: "id=eq.\(room.id.uuidString)")
+                                                 filter: "id=eq.\(idText)")
             guard (try? await channel.subscribeWithError()) != nil else { return }
             for await update in updates {
                 guard !Task.isCancelled else { break }

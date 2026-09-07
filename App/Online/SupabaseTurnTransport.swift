@@ -10,6 +10,8 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
     let incomingLogs: AsyncStream<MatchLog>
     private let continuation: AsyncStream<MatchLog>.Continuation
     private var listenTask: Task<Void, Never>?
+    /// 구독이 실패했을 때의 이유. 진단용.
+    private(set) var subscribeError: String?
 
     init(client: SupabaseClient, matchID: UUID) {
         self.client = client
@@ -17,18 +19,24 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
         var continuation: AsyncStream<MatchLog>.Continuation!
         incomingLogs = AsyncStream(bufferingPolicy: .unbounded) { continuation = $0 }
         self.continuation = continuation
-        listenTask = Task { [client, matchID, continuation] in
-            let channel = client.channel("match-\(matchID.uuidString)")
+        // 필터 값은 소문자 uuid여야 한다 — Realtime은 WAL의 텍스트 값과 문자열로 비교한다.
+        let idText = matchID.uuidString.lowercased()
+        listenTask = Task { [client, continuation, weak self] in
+            let channel = client.channel("match-\(idText)")
             let updates = channel.postgresChange(UpdateAction.self, schema: "public", table: "matches",
-                                                 filter: "id=eq.\(matchID.uuidString)")
+                                                 filter: "id=eq.\(idText)")
             do {
                 try await channel.subscribeWithError()
             } catch {
+                self?.subscribeError = "\(error)"
                 return
             }
             for await update in updates {
-                if let row = try? update.decodeRecord(as: MatchRow.self, decoder: JSONDecoder()) {
+                do {
+                    let row = try update.decodeRecord(as: MatchRow.self, decoder: JSONDecoder())
                     continuation!.yield(row.log)
+                } catch {
+                    self?.subscribeError = "decode: \(error)"
                 }
             }
         }

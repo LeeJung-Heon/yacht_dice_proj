@@ -55,12 +55,12 @@ struct SupabaseE2ETests {
         let library = try TrajectoryLibrary.bundled()
         let hostRecord = try #require(refreshed.record(localUid: hostUid))
         let guestRecord = try #require(joined.record(localUid: guestUid))
+        let hostTransport = SupabaseTurnTransport(client: host.client, matchID: room.id)
+        let guestTransport = SupabaseTurnTransport(client: guest.client, matchID: room.id)
         let hostSession = GameSession(driver: ConstantDriver(face: 3), stage: DiceStage(library: library),
-                                      record: hostRecord,
-                                      transport: SupabaseTurnTransport(client: host.client, matchID: room.id))
+                                      record: hostRecord, transport: hostTransport)
         let guestSession = GameSession(driver: ConstantDriver(face: 5), stage: DiceStage(library: library),
-                                       record: guestRecord,
-                                       transport: SupabaseTurnTransport(client: guest.client, matchID: room.id))
+                                       record: guestRecord, transport: guestTransport)
         hostSession.reduceMotion = true
         guestSession.reduceMotion = true
         hostSession.startListening()
@@ -76,7 +76,8 @@ struct SupabaseE2ETests {
         while guestSession.visibleState.currentPlayer != 1, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(200))
         }
-        #expect(guestSession.visibleState.scorecards[0].entry(.threes) == 15, "게스트가 호스트의 턴을 받지 못했다")
+        #expect(guestSession.visibleState.scorecards[0].entry(.threes) == 15,
+                "게스트가 호스트의 턴을 받지 못했다. 구독 오류: \(guestTransport.subscribeError ?? "없음"), 세션 오류: \(guestSession.lastTransportError ?? "없음")")
         #expect(guestSession.isLocalTurn)
 
         await guestSession.send(.roll)
