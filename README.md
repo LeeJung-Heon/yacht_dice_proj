@@ -49,6 +49,8 @@ SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
 | `App/Scene3D` | RealityKit 씬. `DiceSceneBuilder`(지오메트리), `SceneMaterials`(절차적 PBR 텍스처), `SceneLighting`(조명·IBL), `DiceStage`(궤적 재생). |
 | `Packages/YachtBot` | 컴퓨터 상대. 난이도 3단계, 손패 기대값 전수 계산. YachtCore만 의존. |
 | `App/Views` | 세로 화면 UI. 시작 메뉴(`MenuScreen`), 참가자 띠, 점수판, 액션 바, 결과 바. |
+| `App/Design` | 테마 토큰(라이트/다크, 대비 검사), 종이·가죽·나무 표면, 주사위 면 뷰, 메뉴 카드. |
+| `App/Feedback` | 햅틱 매핑, 합성 효과음(외부 파일 없음), 세션 콜백을 잇는 FeedbackCoordinator, 설정 키. |
 | `App/Online` | Game Center 턴제 매치. `TurnTransport` 프로토콜, 메모리 전송(테스트), Game Center 어댑터, 매치메이커. GameKit은 여기서만 import한다. |
 | `App/AppContainer.swift` | 앱 조립과 저장된 판 복원. |
 | `Tools/TrajectoryBaker` | 물리 시뮬로 궤적을 굽는 macOS 앱. 결과는 `App/Resources/trajectories.bin`. |
@@ -61,6 +63,13 @@ SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
 회전 대칭이라 매 프레임 주사위가 점유하는 공간은 원본과 완전히 같다 — 눈속임이 아니라 동일한 궤적이다.
 이 덕분에 온라인 대전(P3)에서 두 화면이 프레임 단위로 같고, 기기에서 물리를 돌리지 않는다.
 자세한 근거는 `docs/superpowers/specs/2026-08-28-yacht-dice-p1-core-3d-design.md` §7.
+
+### 화면도 테이블 위에 있다
+
+메뉴·점수판·버튼은 3D 트레이와 같은 재질 언어(호두나무·버건디 가죽·상아색 종이·황동)를 쓴다.
+색은 `App/Design/Theme.swift`의 토큰뿐이고, 글자 조합의 대비는 테스트가 4.5:1 이상으로 강제한다.
+나무·가죽 배경은 3D 트레이의 알베도 생성기를 그대로 2x로 깐 것이다.
+앱 아이콘은 `swift Tools/AppIcon/GenerateAppIcon.swift <출력.png>`로 다시 그린다.
 
 ### 3D 에셋은 전부 코드다
 
