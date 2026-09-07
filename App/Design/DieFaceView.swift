@@ -14,12 +14,19 @@ struct DieFaceView: View {
 
     var body: some View {
         ZStack {
+            // 고정된 주사위는 황동 받침 위에 놓인다 — 테두리만으로는 눈이 빽빽한 4·5·6에서 구분이 안 됐다
+            if isHeld {
+                RoundedRectangle(cornerRadius: size * 0.26)
+                    .fill(theme.brass)
+                    .padding(-size * 0.09)
+                    .shadow(color: theme.brass.opacity(0.6), radius: 6)
+            }
             RoundedRectangle(cornerRadius: size * 0.2)
                 .fill(LinearGradient(colors: [theme.ivory, theme.ivory.opacity(0.85)],
                                      startPoint: .top, endPoint: .bottom))
                 .shadow(color: .black.opacity(0.25), radius: isHeld ? 5 : 2, y: isHeld ? 4 : 1)
             RoundedRectangle(cornerRadius: size * 0.2)
-                .strokeBorder(isHeld ? theme.brass : Color.black.opacity(0.12), lineWidth: isHeld ? 2.5 : 1)
+                .strokeBorder(isHeld ? theme.brassInk.opacity(0.6) : Color.black.opacity(0.12), lineWidth: isHeld ? 2 : 1)
             GeometryReader { geo in
                 ForEach(Array(Self.pipPoints(for: value).enumerated()), id: \.offset) { _, point in
                     Circle()
@@ -31,6 +38,6 @@ struct DieFaceView: View {
         }
         .frame(width: size, height: size)
         .opacity(value == 0 ? 0.55 : 1)
-        .offset(y: isHeld ? -3 : 0)
+        .offset(y: isHeld ? -4 : 0)
     }
 }

@@ -136,6 +136,16 @@ enum DiceSceneBuilder {
         pad.name = "pad"
         pad.position = [0, TrayGeometry.shelfTop - padThickness / 2, TrayGeometry.shelfDieZ]
         shelf.addChild(pad)
+
+        // 선반 앞 모서리의 황동 띠. 조명과 무관하게 빛나서 "여기가 고정 구역"으로 읽힌다.
+        var brass = UnlitMaterial(color: .init(red: 0.86, green: 0.66, blue: 0.30, alpha: 1))
+        brass.blending = .opaque
+        let marker = ModelEntity(
+            mesh: .generateBox(size: [padWidth, 0.0012, 0.0025], cornerRadius: 0.0005),
+            materials: [brass])
+        marker.name = "keepMarker"
+        marker.position = [0, TrayGeometry.shelfTop + 0.0006, TrayGeometry.shelfFrontZ - inset - 0.00125]
+        shelf.addChild(marker)
         return shelf
     }
 

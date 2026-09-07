@@ -32,15 +32,18 @@ struct ActionBarView: View {
     /// 각 주사위의 keep 상태를 누를 수 있는 주사위 면. 3D 주사위를 직접 만지는 것보다
     /// 정확하고, VoiceOver로도 조작할 수 있다.
     private var diceRow: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
             ForEach(0..<YachtCore.diceCount, id: \.self) { index in
                 let value = state.dice[index]
                 let isHeld = state.held.contains(index)
                 Button {
                     Task { await session.send(.toggleHold(index)) }
                 } label: {
-                    DieFaceView(value: value, isHeld: isHeld, size: 48)
-                        .animation(reduceMotion ? nil : .spring(duration: 0.25), value: isHeld)
+                    VStack(spacing: 6) {
+                        DieFaceView(value: value, isHeld: isHeld, size: 48)
+                            .animation(reduceMotion ? nil : .spring(duration: 0.25), value: isHeld)
+                        holdCaption(isHeld: isHeld, rolled: value != 0)
+                    }
                 }
                 .buttonStyle(.plain)
                 .disabled(!state.allows(.toggleHold(index)) || session.isBusy || !session.isLocalTurn)
@@ -51,6 +54,29 @@ struct ActionBarView: View {
                 .accessibilityHint("두 번 탭하면 고정을 바꿉니다")
             }
         }
+    }
+
+    /// 칩 아래 "고정" 표시. 고정 안 된 칩도 같은 높이의 자리를 차지해 레이아웃이 튀지 않는다.
+    @ViewBuilder
+    private func holdCaption(isHeld: Bool, rolled: Bool) -> some View {
+        Group {
+            if isHeld {
+                Label("고정", systemImage: "lock.fill")
+                    .labelStyle(.titleAndIcon)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(theme.brassInk)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(theme.brass))
+            } else {
+                Text(rolled ? "탭하여 고정" : " ")
+                    .font(.caption2)
+                    .foregroundStyle(theme.ivory.opacity(rolled ? 0.45 : 0))
+                    .padding(.vertical, 2)
+            }
+        }
+        .frame(height: 18)
+        .accessibilityHidden(true)
     }
 
     private var assistToggle: some View {

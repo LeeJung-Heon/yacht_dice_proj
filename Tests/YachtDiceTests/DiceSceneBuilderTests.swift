@@ -1,5 +1,6 @@
 import Testing
 import RealityKit
+import DiceTrajectory
 @testable import YachtDice
 
 /// IBL 배선 구조를 검증한다. `ImageBasedLightComponent`는 광원에, `ImageBasedLightReceiverComponent`는
@@ -56,5 +57,18 @@ struct DiceHitTestTests {
             #expect(DiceSceneBuilder.slot(of: die) == slot)
         }
         #expect(DiceSceneBuilder.slot(of: root) == nil)
+    }
+}
+
+@Suite("씬 구성 - 고정 구역 표시")
+struct KeepMarkerTests {
+    @Test("선반 앞 모서리에 황동 띠가 있고, 선반 윗면보다 살짝 높으며 주사위가 멈추는 띠 밖에 있다")
+    @MainActor
+    func 황동_띠() throws {
+        let root = DiceSceneBuilder.makeRoot()
+        let marker = try #require(root.findEntity(named: "keepMarker"))
+        let position = marker.position(relativeTo: nil)
+        #expect(position.y > TrayGeometry.shelfTop, "띠가 선반 패드에 묻힌다")
+        #expect(position.z < TrayGeometry.shelfFrontZ, "띠가 굴러간 주사위가 멈추는 영역에 걸친다")
     }
 }
