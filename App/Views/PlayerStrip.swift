@@ -1,9 +1,11 @@
 import SwiftUI
 import YachtCore
 
-/// 좌석별 이름과 총점. 현재 차례를 강조한다. 2인 이상일 때만 보인다.
+/// 좌석별 명패. 현재 차례는 황동 배경. 2인 이상일 때만 보인다.
 struct PlayerStrip: View {
     let session: GameSession
+
+    @Environment(\.theme) private var theme
 
     var body: some View {
         HStack(spacing: 8) {
@@ -17,13 +19,16 @@ struct PlayerStrip: View {
                         if case .bot = participant { Image(systemName: "cpu").font(.caption2) }
                         Text(participant.displayName).font(.caption).lineLimit(1)
                     }
-                    Text("\(total)").font(.system(.subheadline, design: .rounded).weight(.semibold)).monospacedDigit()
+                    Text("\(total)")
+                        .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
                 }
+                .foregroundStyle(isCurrent ? theme.brassInk : theme.ink)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 6)
-                .background(isCurrent ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.08))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(isCurrent ? Color.accentColor : .clear, lineWidth: 2))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .background(RoundedRectangle(cornerRadius: 8).fill(isCurrent ? theme.brass : theme.paper))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(theme.brass, lineWidth: 1.5))
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("players.seat.\(index)")
                 .accessibilityLabel("\(participant.displayName), 총점 \(total)점\(isCurrent ? ", 현재 차례" : "")")

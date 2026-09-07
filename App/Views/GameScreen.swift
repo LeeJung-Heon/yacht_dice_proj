@@ -7,32 +7,37 @@ struct GameScreen: View {
     let stage: DiceStage
     var onReturnToMenu: () -> Void = {}
 
+    @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { geometry in
-            VStack(spacing: 0) {
-                header
-                if session.participants.count > 1 {
-                    PlayerStrip(session: session).padding(.bottom, 6)
-                }
-                DiceStageView(stage: stage) { slot in
-                    Task { await session.send(.toggleHold(slot)) }
-                }
-                .frame(height: geometry.size.height * (session.participants.count > 1 ? 0.38 : 0.42))
-                .contentShape(Rectangle())
-                .gesture(throwGesture)
-                Group {
-                    if session.visibleState.phase == .finished {
-                        GameOverBar(session: session, onReturnToMenu: onReturnToMenu)
-                    } else {
-                        ActionBarView(session: session)
+            ZStack {
+                WoodBackground()
+                VStack(spacing: 0) {
+                    header
+                    if session.participants.count > 1 {
+                        PlayerStrip(session: session).padding(.vertical, 8)
                     }
-                }
-                .padding(.vertical, 10)
-                Divider()
-                ScrollView {
-                    ScoreboardView(session: session)
+                    DiceStageView(stage: stage) { slot in
+                        Task { await session.send(.toggleHold(slot)) }
+                    }
+                    .frame(height: geometry.size.height * (session.participants.count > 1 ? 0.37 : 0.41))
+                    .contentShape(Rectangle())
+                    .gesture(throwGesture)
+                    .overlay(alignment: .top) { edgeShadow(.top) }
+                    .overlay(alignment: .bottom) { edgeShadow(.bottom) }
+                    Group {
+                        if session.visibleState.phase == .finished {
+                            GameOverBar(session: session, onReturnToMenu: onReturnToMenu)
+                        } else {
+                            ActionBarView(session: session)
+                        }
+                    }
+                    .padding(.vertical, 12)
+                    ScrollView {
+                        ScoreboardView(session: session)
+                    }
                 }
             }
             .overlay(alignment: .top) {
@@ -59,40 +64,55 @@ struct GameScreen: View {
         }
     }
 
+    /// 3D 무대와 화면을 이어 붙이는 얇은 그림자.
+    private func edgeShadow(_ edge: Edge) -> some View {
+        LinearGradient(colors: [.black.opacity(0.35), .clear],
+                       startPoint: edge == .top ? .top : .bottom,
+                       endPoint: edge == .top ? .bottom : .top)
+            .frame(height: 14)
+            .allowsHitTesting(false)
+    }
+
     private var header: some View {
         HStack(spacing: 12) {
-            Button {
-                onReturnToMenu()
-            } label: {
-                Image(systemName: "chevron.left").font(.headline)
+            Button(action: onReturnToMenu) {
+                Image(systemName: "chevron.left").font(.headline).foregroundStyle(theme.ivory)
+                    .frame(width: 32, height: 32)
             }
             .accessibilityIdentifier("header.menu")
             .accessibilityLabel("메뉴로")
-            // combine을 이 Group에만 걸어서 header.turn의 label이 항상 턴
-            // 텍스트가 되게 한다. 바깥 HStack 전체에 걸면 "게임 종료"까지
-            // 합쳐져서 두 상태를 구분할 라벨도, 별도로 찾을 static text도
-            // 없어진다.
-            Group {
-                Text("Turn \(session.visibleState.turnIndex)/\(YachtCore.turnCount)")
-                    .font(.system(.headline, design: .rounded))
-                    .monospacedDigit()
+            VStack(alignment: .leading, spacing: 4) {
+                // combine을 이 Group에만 걸어서 header.turn의 label이 항상 턴
+                // 텍스트가 되게 한다. 바깥 HStack 전체에 걸면 "게임 종료"까지
+                // 합쳐져서 두 상태를 구분할 라벨도, 별도로 찾을 static text도
+                // 없어진다.
+                Group {
+                    Text("Turn \(session.visibleState.turnIndex)/\(YachtCore.turnCount)")
+                        .font(.system(.headline, design: .rounded))
+                        .foregroundStyle(theme.ivory)
+                        .monospacedDigit()
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("header.turn")
+                .accessibilityRemoveTraits(.isStaticText)
+                TurnProgress(current: session.visibleState.turnIndex - (session.visibleState.phase == .finished ? 0 : 1),
+                             total: YachtCore.turnCount)
+                    .frame(width: 120)
             }
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("header.turn")
-            .accessibilityRemoveTraits(.isStaticText)
             Spacer()
             if session.visibleState.phase == .finished {
-                Text("게임 종료").font(.headline).foregroundStyle(.green)
+                Text("게임 종료").font(.headline).foregroundStyle(theme.brass)
             } else if case .bot = session.currentParticipant {
-                Text("컴퓨터가 생각 중").font(.subheadline).foregroundStyle(.secondary)
+                Text("컴퓨터가 생각 중").font(.subheadline).foregroundStyle(theme.ivory.opacity(0.8))
                     .accessibilityIdentifier("header.status")
             } else if case .remote = session.currentParticipant {
-                Text("상대 차례").font(.subheadline).foregroundStyle(.secondary)
+                Text("상대 차례").font(.subheadline).foregroundStyle(theme.ivory.opacity(0.8))
                     .accessibilityIdentifier("header.status")
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        .leatherPanel()
     }
 
     /// 위로 쓸어올리면 던진다. 좌우 성분으로 궤적 그룹을 고른다.
