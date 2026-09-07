@@ -17,6 +17,8 @@ packages:
     path: Packages/YachtCore
   DiceTrajectory:
     path: Packages/DiceTrajectory
+  YachtBot:
+    path: Packages/YachtBot
 
 targets:
   YachtDice:
@@ -43,6 +45,7 @@ targets:
     dependencies:
       - package: YachtCore
       - package: DiceTrajectory
+      - package: YachtBot
 
   YachtDiceTests:
     type: bundle.unit-test
