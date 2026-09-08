@@ -9,6 +9,7 @@ struct GameScreen: View {
 
     @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var feedback = FeedbackCoordinator()
     /// 점수판에 펼친 좌석. nil이면 현재 차례를 따라간다.
     @State private var viewedSeat: Int?
@@ -97,6 +98,10 @@ struct GameScreen: View {
             session.reduceMotion = newValue
         }
         .task { feedback.attach(session) }
+        // 앱이 뒤로 갔다 오면 Realtime이 끊겨 있을 수 있으니 서버를 바로 다시 읽는다
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await session.resync() } }
+        }
     }
 
     /// 2인 이상일 때 턴이 바뀌면 누구 차례인지 1.6초 동안 크게 보여준다. 패스앤플레이는 핸드오프가 대신한다.

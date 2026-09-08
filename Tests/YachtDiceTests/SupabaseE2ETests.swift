@@ -106,6 +106,38 @@ struct SupabaseE2ETests {
         #expect(final.eventCount == hostSession.record.log.events.count)
     }
 
+    @Test("Realtime 없이 폴링만으로도 상대의 턴이 도착한다")
+    func 폴링_전달() async throws {
+        let host = SupabaseService(client: makeClient())
+        let guest = SupabaseService(client: makeClient())
+        await host.signIn(); await guest.signIn()
+        let room = try await host.createRoom(name: "A")
+        let joined = try await guest.joinRoom(code: room.code, name: "B")
+        let refreshed = try await host.fetchMatch(id: room.id)
+        let library = try TrajectoryLibrary.bundled()
+        let hostUid = try #require(host.uid)
+        let guestUid = try #require(guest.uid)
+        let hostRecord = try #require(refreshed.record(localUid: hostUid))
+        let guestRecord = try #require(joined.record(localUid: guestUid))
+        let hostSession = GameSession(driver: ConstantDriver(face: 3), stage: DiceStage(library: library),
+                                      record: hostRecord,
+                                      transport: SupabaseTurnTransport(client: host.client, matchID: room.id))
+        // 게스트는 Realtime을 끄고 폴링만 쓴다
+        let guestSession = GameSession(driver: ConstantDriver(face: 5), stage: DiceStage(library: library),
+                                       record: guestRecord,
+                                       transport: SupabaseTurnTransport(client: guest.client, matchID: room.id, realtimeEnabled: false))
+        hostSession.reduceMotion = true; guestSession.reduceMotion = true
+        hostSession.startListening(); guestSession.startListening()
+        await hostSession.send(.roll)
+        await hostSession.send(.commit(.threes))
+        let deadline = ContinuousClock.now + .seconds(12)
+        while !guestSession.isLocalTurn, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        #expect(guestSession.visibleState.scorecards[0].entry(.threes) == 15, "폴링으로 상대 턴이 오지 않았다")
+        #expect(guestSession.isLocalTurn)
+    }
+
     @Test("방을 두 번 만들면 대기 방은 마지막 하나만 남고, 닫으면 사라진다")
     func 대기_방_하나() async throws {
         let host = SupabaseService(client: makeClient())

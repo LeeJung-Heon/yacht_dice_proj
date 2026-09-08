@@ -209,19 +209,34 @@ final class GameSession {
         }
     }
 
+    /// 앱이 앞으로 돌아왔을 때 등, 서버 상태를 즉시 다시 읽는다.
+    func resync() async {
+        await transport?.refresh()
+    }
+
     /// 턴 도중의 굴림·고정을 바로 올린다. 상대 화면이 내 플레이를 실시간으로 따라오게 하기 위해서다.
     private func publishProgressIfOnline() async {
         guard let transport else { return }
-        try? await transport.publishProgress(log: record.log)
+        do {
+            try await transport.publishProgress(log: record.log)
+            lastTransportError = nil
+        } catch {
+            lastTransportError = "서버에 보내지 못해 다시 시도하는 중이다"
+        }
     }
 
     /// 내 턴이 끝나 원격 좌석에게 넘어갔거나 게임이 끝났으면 로그를 올린다.
     private func publishTurnIfNeeded() async {
         guard let transport else { return }
-        if visibleState.phase == .finished {
-            try? await transport.endMatch(log: record.log, totals: visibleState.scorecards.map(\.total))
-        } else if case .remote = currentParticipant {
-            try? await transport.endTurn(log: record.log)
+        do {
+            if visibleState.phase == .finished {
+                try await transport.endMatch(log: record.log, totals: visibleState.scorecards.map(\.total))
+            } else if case .remote = currentParticipant {
+                try await transport.endTurn(log: record.log)
+            }
+            lastTransportError = nil
+        } catch {
+            lastTransportError = "서버에 보내지 못해 다시 시도하는 중이다"
         }
     }
 

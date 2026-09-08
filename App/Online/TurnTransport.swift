@@ -13,6 +13,12 @@ protocol TurnTransport: Sendable {
     func endMatch(log: MatchLog, totals: [Int]) async throws
     /// 상대 턴이 끝나 새 로그가 도착하면 흐른다.
     var incomingLogs: AsyncStream<MatchLog> { get }
+    /// 지금 서버 상태를 한 번 읽어 새 이벤트가 있으면 `incomingLogs`로 흘린다. 앱이 앞으로 돌아왔을 때 부른다.
+    func refresh() async
+}
+
+extension TurnTransport {
+    func refresh() async {}
 }
 
 /// 같은 프로세스 안의 두 세션을 잇는다. 테스트와 디버깅용.
