@@ -10,5 +10,7 @@
 	<true/>
 	<key>manageAppVersionAndBuildNumber</key>
 	<true/>
+	<key>teamID</key>
+	<string>9P8KX3RJRR</string>
 </dict>
 </plist>
