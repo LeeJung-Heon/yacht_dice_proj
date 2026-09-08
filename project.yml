@@ -34,8 +34,13 @@ targets:
         # [1, 2]가 되고, Release 빌드가 "모든 방향을 지원해야 한다"고 경고한다.
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        # Game Center 턴제 매치. 포털에서 앱 ID에 Game Center를 켜야 실기기에서 서명된다.
-        CODE_SIGN_ENTITLEMENTS: App/YachtDice.entitlements
+        # 서명. 무료 Apple ID의 개인 팀으로 실기기에 설치하려면 팀 ID를 환경 변수로 준다:
+        #   DEVELOPMENT_TEAM=ABCDE12345 xcodegen generate
+        # 비워 두면 Xcode의 Signing & Capabilities에서 고른다 (다시 generate하면 초기화된다).
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
+        # Game Center 엔타이틀먼트(App/YachtDice.entitlements)는 유료 계정이 있어야 서명되므로
+        # 지금은 걸지 않는다. Game Center를 되살릴 때 CODE_SIGN_ENTITLEMENTS로 다시 건다.
     info:
       path: App/Info.plist
       properties:

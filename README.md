@@ -60,6 +60,24 @@ SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
 
 가죽·호두나무·주사위 눈은 `App/Scene3D/ProceduralTexture.swift`의 결정적 노이즈로 앱 시작 시 그리므로 외부 텍스처와 모델 파일이 없으며, 트레이의 보이는 모양(모서리 라운드, 선반 패드)은 자유롭게 바꿔도 되지만 주사위가 닿는 면의 위치(`TrayGeometry`)는 구운 궤적과 맞물려 있어 바꾸면 다시 구워야 한다.
 
+## 실기기에 설치하기
+
+유료 개발자 계정 없이 무료 Apple ID의 개인 팀으로 설치할 수 있으며, 프로필이 7일마다 만료되고 기기는 팀당 3대까지라 테스트 용도에 맞고, 아이폰은 iOS 18 이상이어야 한다.
+
+1. Xcode → Settings → Accounts에서 Apple ID를 추가하면 "Personal Team"이 생기고, 그 팀을 선택했을 때 오른쪽에 보이는 Team ID(영숫자 10자리)를 적어 둔다.
+2. 프로젝트를 팀 ID와 함께 생성하고 연다. 팀 ID를 생략하면 Xcode의 Signing & Capabilities에서 팀을 고르면 되지만 다시 generate할 때마다 초기화된다.
+
+   ```sh
+   DEVELOPMENT_TEAM=ABCDE12345 xcodegen generate
+   open YachtDice.xcodeproj
+   ```
+
+3. 아이폰을 케이블로 연결하고 잠금을 푼 뒤 "이 컴퓨터를 신뢰"를 누르며, iOS 16 이상은 설정 → 개인정보 보호 및 보안 → 개발자 모드를 켜고 재시동해야 Xcode가 기기를 쓸 수 있다.
+4. Xcode 상단의 실행 대상을 그 아이폰으로 바꾸고 `YachtDice` 스킴을 Run(⌘R)하면 빌드·서명·설치가 한 번에 되며, 처음 한 번은 아이폰의 설정 → 일반 → VPN 및 기기 관리에서 내 Apple ID 개발자 앱을 신뢰해야 아이콘을 눌러 열 수 있다.
+5. 한 번 설치한 뒤에는 케이블 없이도 같은 Wi-Fi에서 Run할 수 있고(기기 창에서 "Connect via network"), 7일이 지나 앱이 열리지 않으면 Xcode에서 다시 Run하면 된다.
+
+온라인 대전을 실기기 두 대로 해 보려면 각 기기에 위 절차로 설치하고(한 Apple ID의 개인 팀으로 두 기기 모두 가능) 한쪽이 방을 만들어 코드를 알려 주면 되며, Game Center 엔타이틀먼트는 개인 팀으로 서명되지 않아 `project.yml`에서 빼 두었다.
+
 ## 온라인 대전
 
 온라인 대전은 Supabase 무료 티어(프로젝트 `yacht-dice`, 서울)로 동작하며, 기기마다 익명 로그인으로 계정 하나를 받고 6자리 방 코드로 상대와 만나며, 한 판은 `public.matches` 행 하나이고 매치 데이터는 `MatchLog` JSON 그대로다. 내 턴이 끝나면 행을 갱신하고 상대 턴은 Realtime으로 그 행의 UPDATE를 받아 `GameState.canApply`로 검증한 뒤 재생하므로, 규칙 위반은 막지만 주사위는 각 클라이언트가 굴려 조작된 클라이언트의 "운 좋은 눈"은 막지 못한다(스펙 P2/P3 §7.4). 서버 쪽 RLS는 참가자만 행을 읽고 갱신하게 하고, 방 입장은 `join_match` 함수가 대기 중인 빈 자리에만 넣으며, 좌석 교체는 트리거가 막는다.
