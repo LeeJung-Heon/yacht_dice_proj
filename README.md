@@ -78,6 +78,24 @@ SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
 
 온라인 대전을 실기기 두 대로 해 보려면 각 기기에 위 절차로 설치하고(한 Apple ID의 개인 팀으로 두 기기 모두 가능) 한쪽이 방을 만들어 코드를 알려 주면 되며, Game Center 엔타이틀먼트는 개인 팀으로 서명되지 않아 `project.yml`에서 빼 두었다.
 
+## TestFlight로 배포하기
+
+남에게 온라인으로 설치하게 하는 공식 경로는 유료 개발자 계정(연 129,000원)의 TestFlight뿐이며, 저장소 쪽 준비는 끝나 있어서 계정과 App Store Connect 레코드만 만들면 아카이브해 올릴 수 있다. 준비된 것은 UserDefaults 사용 이유와 수집 항목(익명 계정 ID, 닉네임)을 적은 `App/PrivacyInfo.xcprivacy`, 버전 설정(`MARKETING_VERSION`, `CURRENT_PROJECT_VERSION`), 업로드 스크립트 `Tools/Release/upload.sh`, 그리고 외부 테스터 정보에 넣을 개인정보처리방침 `docs/privacy-policy.md`다.
+
+1. https://developer.apple.com/programs/enroll 에서 Apple Developer Program에 개인으로 등록하면 승인까지 하루쯤 걸리며, 승인되면 Xcode → Settings → Accounts에 그 팀이 나타나고 Team ID를 알 수 있다.
+2. https://appstoreconnect.apple.com 에서 앱을 새로 만들되 번들 ID는 `com.leejungheon.yachtdice.YachtDice`, 이름은 "요트 다이스", 기본 언어는 한국어로 하며, 번들 ID가 목록에 없으면 https://developer.apple.com/account/resources/identifiers 에서 먼저 등록한다.
+3. 아카이브와 업로드는 스크립트 한 줄로 되며, Xcode에 로그인된 Apple ID로 서명과 업로드가 진행된다.
+
+   ```sh
+   DEVELOPMENT_TEAM=ABCDE12345 Tools/Release/upload.sh
+   ```
+
+   Xcode에서 직접 하려면 실행 대상을 Any iOS Device로 두고 Product → Archive 뒤 Organizer에서 Distribute App → App Store Connect → Upload를 고르면 같다.
+4. App Store Connect → TestFlight 탭에서 빌드 처리가 끝나면(보통 10분 안쪽) 외부 테스트 그룹을 만들고 Test Information에 연락처 이메일과 개인정보처리방침 URL(`docs/privacy-policy.md`를 GitHub Pages나 저장소 링크로)을 넣은 뒤 빌드를 그룹에 붙이면 첫 빌드는 간단한 Beta App Review를 거친다.
+5. 그룹의 Public Link를 켜 링크를 나누면 받는 사람은 TestFlight 앱을 설치하고 링크를 눌러 받으며, 빌드는 90일 뒤 만료되고 새 빌드를 올릴 때는 `project.yml`의 `CURRENT_PROJECT_VERSION`을 1 올린다.
+
+유료 계정이 생기면 Game Center도 쓸 수 있는데, 포털의 앱 ID에 Game Center를 켜고 `project.yml`에 `CODE_SIGN_ENTITLEMENTS: App/YachtDice.entitlements`를 되살린 뒤 온라인 메뉴를 Game Center 버전으로 바꾸면 매치메이커와 턴 알림이 붙는다.
+
 ## 온라인 대전
 
 온라인 대전은 Supabase 무료 티어(프로젝트 `yacht-dice`, 서울)로 동작하며, 기기마다 익명 로그인으로 계정 하나를 받고 6자리 방 코드로 상대와 만나며, 한 판은 `public.matches` 행 하나이고 매치 데이터는 `MatchLog` JSON 그대로다. 내 턴이 끝나면 행을 갱신하고 상대 턴은 Realtime으로 그 행의 UPDATE를 받아 `GameState.canApply`로 검증한 뒤 재생하므로, 규칙 위반은 막지만 주사위는 각 클라이언트가 굴려 조작된 클라이언트의 "운 좋은 눈"은 막지 못한다(스펙 P2/P3 §7.4). 서버 쪽 RLS는 참가자만 행을 읽고 갱신하게 하고, 방 입장은 `join_match` 함수가 대기 중인 빈 자리에만 넣으며, 좌석 교체는 트리거가 막는다.
