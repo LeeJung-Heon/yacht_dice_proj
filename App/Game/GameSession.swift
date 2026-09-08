@@ -213,8 +213,18 @@ final class GameSession {
         }
     }
 
+    /// 상대 플레이를 재생할 때 이벤트 사이에 두는 뜸. 실제 상대의 손놀림보다 빨리 지나가면 뭘 했는지 읽을 수 없다.
+    static let remotePauseAfterRoll: Duration = .milliseconds(700)
+    static let remotePauseAfterHold: Duration = .milliseconds(600)
+    static let remotePauseAfterCommit: Duration = .milliseconds(1500)
+
+    private func remotePause(_ duration: Duration) async {
+        guard !reduceMotion else { return }
+        try? await Task.sleep(for: duration)
+    }
+
     /// 상대가 보낸 로그에서 내가 모르는 이벤트만 검증하며 재생한다.
-    /// 굴림은 3D로 보여주고, 고정·기록은 즉시 적용한다.
+    /// 굴림은 3D로 보여주고, 고정·기록은 적용한 뒤 잠깐 멈춰 눈으로 따라올 시간을 준다.
     private func replay(remote log: MatchLog) async {
         let mine = record.log.events
         guard log.playerCount == record.log.playerCount,
@@ -239,11 +249,19 @@ final class GameSession {
                                      onCue: { [weak self] cue in self?.onCollisionCue?(cue) })
                 record.log.append(event)
                 visibleState = visibleState.applying(event)
+                await remotePause(Self.remotePauseAfterRoll)
             case .holdToggled:
                 record.log.append(event)
                 visibleState = visibleState.applying(event)
                 stage.placeHeld(visibleState.held.sorted(), values: visibleState.dice)
-            case .committed, .gameEnded:
+                onHoldToggled?()
+                await remotePause(Self.remotePauseAfterHold)
+            case .committed(let category, let points):
+                record.log.append(event)
+                visibleState = visibleState.applying(event)
+                onCommitted?(category, points, false)
+                await remotePause(Self.remotePauseAfterCommit)
+            case .gameEnded:
                 record.log.append(event)
                 visibleState = visibleState.applying(event)
             case .turnAdvanced:

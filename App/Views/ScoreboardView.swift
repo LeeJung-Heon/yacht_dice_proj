@@ -4,13 +4,18 @@ import YachtCore
 /// 종이 점수표. 이름 … 점선 리더 … 점수.
 struct ScoreboardView: View {
     let session: GameSession
+    /// 보여줄 좌석. nil이면 현재 차례의 좌석이다. 상대 차례에 내 점수판을 보는 데 쓴다.
+    var seat: Int? = nil
 
     @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var bonusFlash = 0.0
 
     private var state: GameState { session.visibleState }
-    private var card: ScoreCard { state.scorecards[state.currentPlayer] }
+    private var shownSeat: Int { seat ?? state.currentPlayer }
+    /// 현재 차례의 점수판을 보고 있을 때만 기록할 수 있고 미리보기가 뜬다.
+    private var isCurrentSeat: Bool { shownSeat == state.currentPlayer }
+    private var card: ScoreCard { state.scorecards[shownSeat] }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,7 +48,7 @@ struct ScoreboardView: View {
 
     private func row(_ category: ScoreCategory) -> some View {
         let recorded = card.entry(category)
-        let preview = session.previewScore(category)
+        let preview = isCurrentSeat ? session.previewScore(category) : nil
 
         return Button {
             Task { await session.send(.commit(category)) }
@@ -80,7 +85,7 @@ struct ScoreboardView: View {
             .padding(.vertical, 5)
         }
         .buttonStyle(.plain)
-        .disabled(recorded != nil || !state.allows(.commit(category)) || session.isBusy || !session.isLocalTurn)
+        .disabled(!isCurrentSeat || recorded != nil || !state.allows(.commit(category)) || session.isBusy || !session.isLocalTurn)
         .accessibilityIdentifier("scoreboard.row.\(category.rawValue)")
         .accessibilityLabel(accessibilityLabel(for: category, recorded: recorded, preview: preview))
         .accessibilityHint(recorded == nil ? category.accessibilityDescription : "")

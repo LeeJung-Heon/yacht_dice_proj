@@ -50,9 +50,11 @@ final class SupabaseService {
         }
     }
 
-    /// 방을 만든다. 코드가 겹치면 다시 뽑는다.
+    /// 방을 만든다. 호스트는 대기 방을 하나만 가지므로 먼저 이전 대기 방을 지우고, 코드가 겹치면 다시 뽑는다.
     func createRoom(name: String) async throws -> MatchRow {
         guard let uid else { throw ServiceError.notSignedIn }
+        try await client.from("matches").delete()
+            .eq("host_uid", value: uid.uuidString).eq("status", value: "waiting").execute()
         var generator = SystemRandomNumberGenerator()
         var lastError: Error = ServiceError.codeCollision
         for _ in 0..<5 {
@@ -76,6 +78,12 @@ final class SupabaseService {
             .single()
             .execute().value
         return row
+    }
+
+    /// 대기 방 취소나 끝난 판 정리. 참가자만 지울 수 있다(RLS).
+    func deleteMatch(id: UUID) async throws {
+        try await client.from("matches").delete().eq("id", value: id.uuidString).execute()
+        myMatches.removeAll { $0.id == id }
     }
 
     func fetchMatch(id: UUID) async throws -> MatchRow {

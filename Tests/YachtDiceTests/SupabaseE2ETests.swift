@@ -106,6 +106,21 @@ struct SupabaseE2ETests {
         #expect(final.eventCount == hostSession.record.log.events.count)
     }
 
+    @Test("방을 두 번 만들면 대기 방은 마지막 하나만 남고, 닫으면 사라진다")
+    func 대기_방_하나() async throws {
+        let host = SupabaseService(client: makeClient())
+        await host.signIn()
+        let first = try await host.createRoom(name: "A")
+        let second = try await host.createRoom(name: "A")
+        #expect(first.id != second.id)
+        await host.reloadMatches()
+        let waiting = host.myMatches.filter(\.isWaiting)
+        #expect(waiting.map(\.id) == [second.id], "대기 방이 하나가 아니다: \(waiting.map(\.code))")
+        try await host.deleteMatch(id: second.id)
+        await host.reloadMatches()
+        #expect(host.myMatches.filter(\.isWaiting).isEmpty)
+    }
+
     @Test("이미 찬 방이나 없는 코드는 들어갈 수 없다")
     func 입장_거부() async throws {
         let guest = SupabaseService(client: makeClient())

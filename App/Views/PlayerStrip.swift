@@ -4,6 +4,9 @@ import YachtCore
 /// 좌석별 명패. 현재 차례는 황동 배경. 2인 이상일 때만 보인다.
 struct PlayerStrip: View {
     let session: GameSession
+    /// 점수판에 보이는 좌석. nil이면 현재 차례.
+    var viewedSeat: Int? = nil
+    var onSelect: (Int) -> Void = { _ in }
 
     @Environment(\.theme) private var theme
 
@@ -14,6 +17,10 @@ struct PlayerStrip: View {
                 let total = session.visibleState.scorecards[index].total
                 let isCurrent = session.visibleState.currentPlayer == index
                     && session.visibleState.phase != .finished
+                let isViewed = (viewedSeat ?? session.visibleState.currentPlayer) == index
+                Button {
+                    onSelect(index)
+                } label: {
                 VStack(spacing: 2) {
                     HStack(spacing: 4) {
                         if case .bot = participant { Image(systemName: "cpu").font(.caption2) }
@@ -28,10 +35,15 @@ struct PlayerStrip: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 6)
                 .background(RoundedRectangle(cornerRadius: 8).fill(isCurrent ? theme.brass : theme.paper))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(theme.brass, lineWidth: 1.5))
+                // 점수판에 펼쳐 놓은 좌석은 테두리를 두껍게
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(isViewed ? theme.ink : theme.brass, lineWidth: isViewed ? 2.5 : 1.5))
+                .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("players.seat.\(index)")
                 .accessibilityLabel("\(participant.displayName), 총점 \(total)점\(isCurrent ? ", 현재 차례" : "")")
+                .accessibilityHint("탭하면 이 사람의 점수판을 본다")
             }
         }
         .padding(.horizontal, 16)

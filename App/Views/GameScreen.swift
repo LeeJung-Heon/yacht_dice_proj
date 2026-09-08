@@ -10,6 +10,11 @@ struct GameScreen: View {
     @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var feedback = FeedbackCoordinator()
+    /// 점수판에 펼친 좌석. nil이면 현재 차례를 따라간다.
+    @State private var viewedSeat: Int?
+    /// 턴이 바뀔 때 잠깐 보이는 배너.
+    @State private var turnBanner: String?
+    @State private var bannerTask: Task<Void, Never>?
 
     var body: some View {
         GeometryReader { geometry in
@@ -18,7 +23,10 @@ struct GameScreen: View {
                 VStack(spacing: 0) {
                     header
                     if session.participants.count > 1 {
-                        PlayerStrip(session: session).padding(.vertical, 8)
+                        PlayerStrip(session: session, viewedSeat: viewedSeat) { seat in
+                            viewedSeat = seat == session.visibleState.currentPlayer ? nil : seat
+                        }
+                        .padding(.vertical, 8)
                     }
                     DiceStageView(stage: stage) { slot in
                         Task { await session.send(.toggleHold(slot)) }
@@ -37,7 +45,7 @@ struct GameScreen: View {
                     }
                     .padding(.vertical, 12)
                     ScrollView {
-                        ScoreboardView(session: session)
+                        ScoreboardView(session: session, seat: viewedSeat)
                     }
                 }
             }
@@ -59,11 +67,36 @@ struct GameScreen: View {
                     }
                 }
             }
+            .overlay {
+                if let turnBanner {
+                    TurnBanner(text: turnBanner)
+                        .transition(.scale(scale: 0.9).combined(with: .opacity))
+                }
+            }
+        }
+        .onChange(of: session.visibleState.currentPlayer, initial: true) { _, seat in
+            viewedSeat = nil
+            showTurnBanner(for: seat)
         }
         .onChange(of: reduceMotion, initial: true) { _, newValue in
             session.reduceMotion = newValue
         }
         .task { feedback.attach(session) }
+    }
+
+    /// 2인 이상일 때 턴이 바뀌면 누구 차례인지 1.6초 동안 크게 보여준다. 패스앤플레이는 핸드오프가 대신한다.
+    private func showTurnBanner(for seat: Int) {
+        guard session.participants.count > 1, session.visibleState.phase != .finished,
+              !session.pendingHandoff else { return }
+        let participant = session.participants[seat]
+        let text = participant.isHuman && session.isLocalTurn ? "내 차례" : "\(participant.displayName)의 차례"
+        bannerTask?.cancel()
+        withAnimation(reduceMotion ? nil : .spring(duration: 0.3)) { turnBanner = text }
+        bannerTask = Task {
+            try? await Task.sleep(for: .milliseconds(1600))
+            guard !Task.isCancelled else { return }
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { turnBanner = nil }
+        }
     }
 
     /// 3D 무대와 화면을 이어 붙이는 얇은 그림자.
