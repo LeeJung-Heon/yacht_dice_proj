@@ -13,6 +13,11 @@ final class GameCenterTurnTransport: TurnTransport, @unchecked Sendable {
         incomingLogs = service.stream(for: match.matchID)
     }
 
+    /// 차례를 넘기지 않고 매치 데이터만 갱신한다. 상대가 열어 두었으면 턴 이벤트로 받는다.
+    func publishProgress(log: MatchLog) async throws {
+        try await match.saveCurrentTurn(withMatch: try log.encoded())
+    }
+
     func endTurn(log: MatchLog) async throws {
         let data = try log.encoded()
         // GKTurnTimeoutDefault(1주)와 같은 값. 전역 var라 strict concurrency에서 직접 못 읽는다.

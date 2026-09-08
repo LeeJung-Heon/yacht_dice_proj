@@ -17,7 +17,7 @@ Game Center는 유료 개발자 계정에서만 켤 수 있으므로, 무료 App
 | 식별 | 익명 로그인(`signInAnonymously`)으로 기기마다 `auth.uid()` 하나. 닉네임은 기기에 저장한 문자열 |
 | 매칭 | 6자리 방 코드. 호스트가 만들고 게스트가 입력한다. 자동 매칭과 친구 목록은 없다 |
 | 데이터 | `public.matches` 행 하나 = 한 판. `log`는 `MatchLog` JSON 그대로 |
-| 전달 | Realtime Postgres Changes로 그 행의 UPDATE를 구독한다. 앱이 열려 있을 때만 받고 푸시 알림은 없다 |
+| 전달 | 굴림·고정·기록마다 행을 갱신하고 Realtime Postgres Changes로 그 행의 UPDATE를 구독하므로 상대 플레이가 이벤트 단위로 실시간에 보인다. 앱이 열려 있을 때만 받고 푸시 알림은 없다 |
 | 신뢰 | 상대 로그는 `GameState.canApply`로 검증한다(P3과 같다). 좌석 교체는 트리거가 막는다 |
 | 기존 GC | `App/Online`에 남기되 메뉴에서는 부르지 않는다 |
 
@@ -49,7 +49,7 @@ Game Center는 유료 개발자 계정에서만 켤 수 있으므로, 무료 App
 1. 온라인 메뉴에 들어오면 익명 로그인한다. 실패하면 이유(대개 익명 로그인 미설정)를 보여준다.
 2. 호스트는 방 만들기를 누르고 6자리 코드를 본다. 앱은 코드로 행을 삽입하고 그 행의 UPDATE를 구독하며, `guest_uid`가 채워지면 좌석 `[host, guest]`로 게임을 연다. 호스트가 좌석 0이라 바로 내 차례다.
 3. 게스트는 코드를 입력하고 `join_match`를 호출한다. 돌아온 행으로 좌석 `[host, guest]`, 내 좌석 1로 게임을 열고 상대 차례를 기다린다.
-4. 내 턴이 끝나면 `log`, `event_count`, `status`를 UPDATE한다. 상대는 Realtime으로 새 행을 받아 P3과 같은 `replay(remote:)`로 재생한다.
+4. 굴림·고정마다 `publishProgress`로, 기록 뒤에는 `endTurn`으로 `log`, `event_count`, `status`를 UPDATE한다. 상대는 Realtime으로 새 행을 받아 P3과 같은 `replay(remote:)`로 내가 모르는 이벤트만 재생하므로 턴 도중에도 굴림이 그대로 보인다.
 5. 게임이 끝나면 `status = finished`, `totals`를 쓴다.
 6. 진행 중인 매치 목록은 `status <> 'finished'`인 내 행이며, 열면 `matchData`로 이어한다. 호스트가 대기 중인 방을 열면 다시 코드를 보여준다.
 

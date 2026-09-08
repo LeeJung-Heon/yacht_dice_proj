@@ -113,7 +113,8 @@ final class GameSession {
     }
 
     /// 테스트용: 도착한 로그를 전부 재생할 때까지 기다린다.
-    /// 로그가 아직 도착하지 않았을 수 있으므로 잠깐(최대 2초) 기다려 본다.
+    /// 로그가 아직 도착하지 않았을 수 있으므로 잠깐(최대 2초) 기다린 뒤,
+    /// 실시간 갱신은 여러 로그가 잇따라 오므로 50ms 동안 새 이벤트가 없을 때까지 더 기다린다.
     func waitForIncoming() async {
         let before = record.log.events.count
         let deadline = ContinuousClock.now + .seconds(2)
@@ -122,7 +123,14 @@ final class GameSession {
             await Task.yield()
             try? await Task.sleep(for: .milliseconds(5))
         }
-        await replayTask?.value
+        var settled = -1
+        while true {
+            await replayTask?.value
+            let count = record.log.events.count
+            if count == settled { break }
+            settled = count
+            try? await Task.sleep(for: .milliseconds(50))
+        }
     }
 
     /// 끝난 판을 접고 같은 모드로 새 판을 시작한다.
@@ -165,10 +173,12 @@ final class GameSession {
         switch intent {
         case .roll:
             await performRoll()
+            await publishProgressIfOnline()
         case .toggleHold(let index):
             await commitEvents([.holdToggled(index)])
             stage.placeHeld(visibleState.held.sorted(), values: visibleState.dice)
             onHoldToggled?()
+            await publishProgressIfOnline()
         case .commit(let category):
             let points = category.score(visibleState.dice)
             let bonusBefore = visibleState.scorecards[visibleState.currentPlayer].upperBonus
@@ -185,6 +195,12 @@ final class GameSession {
             }
             await publishTurnIfNeeded()
         }
+    }
+
+    /// 턴 도중의 굴림·고정을 바로 올린다. 상대 화면이 내 플레이를 실시간으로 따라오게 하기 위해서다.
+    private func publishProgressIfOnline() async {
+        guard let transport else { return }
+        try? await transport.publishProgress(log: record.log)
     }
 
     /// 내 턴이 끝나 원격 좌석에게 넘어갔거나 게임이 끝났으면 로그를 올린다.

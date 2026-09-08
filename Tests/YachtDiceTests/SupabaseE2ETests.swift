@@ -69,6 +69,16 @@ struct SupabaseE2ETests {
 
         #expect(hostSession.isLocalTurn && !guestSession.isLocalTurn)
         await hostSession.send(.roll)
+
+        // 턴이 끝나기 전에도 게스트 화면에 굴림이 도착한다
+        let midDeadline = ContinuousClock.now + .seconds(15)
+        while guestSession.visibleState.rollsRemaining != 2, ContinuousClock.now < midDeadline {
+            try await Task.sleep(for: .milliseconds(200))
+        }
+        #expect(guestSession.visibleState.dice == hostSession.visibleState.dice,
+                "호스트의 첫 굴림이 실시간으로 오지 않았다. 구독 오류: \(guestTransport.subscribeError ?? "없음")")
+        #expect(!guestSession.isLocalTurn)
+
         await hostSession.send(.commit(.threes))
 
         // 게스트가 Realtime으로 받는다

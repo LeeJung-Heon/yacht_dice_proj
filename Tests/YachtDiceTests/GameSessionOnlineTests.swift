@@ -43,6 +43,24 @@ struct GameSessionOnlineTests {
         #expect(b.isLocalTurn && !a.isLocalTurn)
     }
 
+    @Test("상대가 굴리는 도중에도 내 화면에 굴림이 도착하고, 차례는 아직 상대다")
+    func 실시간_중계() async throws {
+        let (a, b) = try makePair()
+        await a.send(.roll)
+        await b.waitForIncoming()
+        #expect(b.visibleState.dice == a.visibleState.dice, "첫 굴림이 실시간으로 오지 않았다")
+        #expect(b.visibleState.rollsRemaining == 2)
+        #expect(!b.isLocalTurn && a.isLocalTurn)
+
+        await a.send(.toggleHold(0))
+        await b.waitForIncoming()
+        #expect(b.visibleState.held == [0], "고정이 실시간으로 오지 않았다")
+
+        await a.send(.commit(.choice))
+        await b.waitForIncoming()
+        #expect(b.isLocalTurn)
+    }
+
     @Test("두 세션이 12턴을 완주하고 로그가 같다")
     func 완주() async throws {
         let (a, b) = try makePair()

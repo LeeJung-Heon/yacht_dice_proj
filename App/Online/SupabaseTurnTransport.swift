@@ -47,6 +47,11 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
         continuation.finish()
     }
 
+    /// 턴 도중에도 같은 행을 갱신한다. 상대는 Realtime으로 굴림 하나하나를 받아 재생한다.
+    func publishProgress(log: MatchLog) async throws {
+        try await endTurn(log: log)
+    }
+
     func endTurn(log: MatchLog) async throws {
         try await client.from("matches")
             .update(TurnUpdate(log: log, eventCount: log.events.count, status: "playing", totals: nil))
