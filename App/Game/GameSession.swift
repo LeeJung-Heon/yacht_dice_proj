@@ -41,6 +41,15 @@ final class GameSession {
 
     private var botTask: Task<Void, Never>?
 
+    /// 남(원격 상대나 봇)이 방금 기록한 것. 화면이 팝업으로 알린다. id가 바뀔 때마다 새 기록이다.
+    struct OpponentCommit: Equatable {
+        let id = UUID()
+        let seat: Int
+        let category: ScoreCategory
+        let points: Int
+    }
+    private(set) var lastOpponentCommit: OpponentCommit?
+
     // MARK: 온라인
     private let transport: (any TurnTransport)?
     private var listenTask: Task<Void, Never>?
@@ -189,6 +198,9 @@ final class GameSession {
             await commitEvents(events)
             let bonusReached = bonusBefore == 0 && visibleState.scorecards[seat].upperBonus > 0
             onCommitted?(category, points, bonusReached)
+            if !participants[seat].isHuman {
+                lastOpponentCommit = OpponentCommit(seat: seat, category: category, points: points)
+            }
             if !visibleState.isAllScored {
                 stage.reset()
                 scheduleTurnOwner(announceHandoff: true)
@@ -257,9 +269,11 @@ final class GameSession {
                 onHoldToggled?()
                 await remotePause(Self.remotePauseAfterHold)
             case .committed(let category, let points):
+                let seat = visibleState.currentPlayer
                 record.log.append(event)
                 visibleState = visibleState.applying(event)
                 onCommitted?(category, points, false)
+                lastOpponentCommit = OpponentCommit(seat: seat, category: category, points: points)
                 await remotePause(Self.remotePauseAfterCommit)
             case .gameEnded:
                 record.log.append(event)

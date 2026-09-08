@@ -15,6 +15,9 @@ struct GameScreen: View {
     /// 턴이 바뀔 때 잠깐 보이는 배너.
     @State private var turnBanner: String?
     @State private var bannerTask: Task<Void, Never>?
+    /// 상대가 방금 기록한 칸과 점수. 헤더 아래에 잠깐 뜬다.
+    @State private var scoreToast: String?
+    @State private var toastTask: Task<Void, Never>?
 
     var body: some View {
         GeometryReader { geometry in
@@ -73,10 +76,22 @@ struct GameScreen: View {
                         .transition(.scale(scale: 0.9).combined(with: .opacity))
                 }
             }
+            .overlay(alignment: .top) {
+                if let scoreToast {
+                    ScoreToast(text: scoreToast)
+                        .padding(.top, session.participants.count > 1 ? 118 : 60)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
         }
         .onChange(of: session.visibleState.currentPlayer, initial: true) { _, seat in
             viewedSeat = nil
             showTurnBanner(for: seat)
+        }
+        .onChange(of: session.lastOpponentCommit?.id) { _, _ in
+            guard let commit = session.lastOpponentCommit else { return }
+            let name = session.participants[commit.seat].displayName
+            showScoreToast("\(name): \(commit.category.displayName) \(commit.points)점 기록")
         }
         .onChange(of: reduceMotion, initial: true) { _, newValue in
             session.reduceMotion = newValue
@@ -96,6 +111,17 @@ struct GameScreen: View {
             try? await Task.sleep(for: .milliseconds(1600))
             guard !Task.isCancelled else { return }
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { turnBanner = nil }
+        }
+    }
+
+    /// 상대나 봇이 기록한 칸과 점수를 2초 동안 보여준다.
+    private func showScoreToast(_ text: String) {
+        toastTask?.cancel()
+        withAnimation(reduceMotion ? nil : .spring(duration: 0.3)) { scoreToast = text }
+        toastTask = Task {
+            try? await Task.sleep(for: .milliseconds(2200))
+            guard !Task.isCancelled else { return }
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { scoreToast = nil }
         }
     }
 

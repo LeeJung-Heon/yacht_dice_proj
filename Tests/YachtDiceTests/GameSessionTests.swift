@@ -277,6 +277,16 @@ struct GameSessionParticipantTests {
         #expect(session.isLocalTurn)
     }
 
+    @Test("봇이 기록하면 알림이 남는다")
+    func 봇_기록_알림() async throws {
+        let session = try makeSession(mode: .versusBot(.normal))
+        await session.send(.roll)
+        await session.send(.commit(.threes))
+        await session.waitForBotTurn()
+        let commit = try #require(session.lastOpponentCommit)
+        #expect(commit.seat == 1)
+    }
+
     @Test("봇 차례에는 send가 거부된다")
     func 봇_차례_잠금() async throws {
         let session = try makeSession(mode: .versusBot(.easy))

@@ -41,7 +41,7 @@ targets:
         DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
         # 스토어 버전. TestFlight에 올릴 때마다 CURRENT_PROJECT_VERSION을 1씩 올린다.
         MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: 1
+        CURRENT_PROJECT_VERSION: 2
         # Game Center 엔타이틀먼트(App/YachtDice.entitlements)는 유료 계정이 있어야 서명되므로
         # 지금은 걸지 않는다. Game Center를 되살릴 때 CODE_SIGN_ENTITLEMENTS로 다시 건다.
     info:

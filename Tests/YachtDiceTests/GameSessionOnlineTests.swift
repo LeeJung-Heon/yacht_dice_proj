@@ -61,6 +61,17 @@ struct GameSessionOnlineTests {
         #expect(b.isLocalTurn)
     }
 
+    @Test("상대가 기록하면 어느 칸에 몇 점인지 알림이 남는다")
+    func 상대_기록_알림() async throws {
+        let (a, b) = try makePair()
+        await a.send(.roll)
+        await a.send(.commit(.threes))
+        await b.waitForIncoming()
+        let commit = try #require(b.lastOpponentCommit)
+        #expect(commit.seat == 0 && commit.category == .threes && commit.points == 15)
+        #expect(a.lastOpponentCommit == nil, "내가 기록한 것은 알림이 아니다")
+    }
+
     @Test("두 세션이 12턴을 완주하고 로그가 같다")
     func 완주() async throws {
         let (a, b) = try makePair()
