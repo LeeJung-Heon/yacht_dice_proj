@@ -53,36 +53,55 @@ final class DiceStage {
     ///   - slots: 굴릴 주사위 슬롯 (keep되지 않은 것들).
     ///   - skipAnimation: Reduce Motion이 켜져 있으면 true.
     /// - Returns: 재생 중 터뜨릴 충돌 큐. 호출자가 사운드·햅틱에 쓴다.
+    /// 한 번의 굴림에서 고른 것. 상대에게 힌트로 보내면 같은 던지기를 보여 줄 수 있다.
+    struct RollOutcome {
+        let cues: [CollisionCue]
+        let trajectoryID: UInt16
+        let direction: ThrowDirection
+        let yaws: [Int]
+    }
+
+    /// - Parameters:
+    ///   - hint: 상대가 굴릴 때 고른 궤적·회전. 맞으면 그대로 써서 같은 던지기를 재생한다.
     func roll(values: [Int], slots: [Int], direction: ThrowDirection,
-              skipAnimation: Bool, onCue: ((CollisionCue) -> Void)? = nil) async -> [CollisionCue] {
+              skipAnimation: Bool, hint: ThrowHint? = nil,
+              onCue: ((CollisionCue) -> Void)? = nil) async -> RollOutcome {
         precondition(values.count == slots.count, "값과 슬롯의 개수가 다르다")
-        guard !slots.isEmpty else { return [] }
+        guard !slots.isEmpty else { return RollOutcome(cues: [], trajectoryID: 0, direction: direction, yaws: []) }
 
         var generator = SystemRandomNumberGenerator()
+        // 힌트가 맞으면 그대로 쓴다. 상대 화면과 같은 던지기를 보이기 위해서다.
+        let hinted: Trajectory? = hint.flatMap { hint in
+            guard let t = library.trajectory(id: hint.trajectory), t.dieCount == slots.count,
+                  hint.yaws.count == slots.count, hint.yaws.allSatisfy({ (0..<4).contains($0) }) else { return nil }
+            return t
+        }
+        let usedDirection = (hinted != nil ? hint.flatMap { ThrowDirection(rawValue: $0.direction) } : nil) ?? direction
         // 굴리는 개수 1~5 × 방향 3종 = 15가지 조합 모두에 최소 20개씩 들어 있다는 것을
         // TrajectoryLibraryTests.변형_다양성이 번들 파일에 대해 보장한다.
-        guard let trajectory = library.pick(dieCount: slots.count, direction: direction, using: &generator) else {
+        guard let trajectory = hinted ?? library.pick(dieCount: slots.count, direction: usedDirection, using: &generator) else {
             assertionFailure("\(slots.count)개 / \(direction) 궤적이 번들에 없다")
-            return []
+            return RollOutcome(cues: [], trajectoryID: 0, direction: direction, yaws: [])
         }
 
-        // 굴리는 각 주사위에 대해 오프셋을 미리 계산한다.
+        // 굴리는 각 주사위에 대해 회전 선택을 정한다. 힌트가 있으면 그것을, 없으면
         // 4개 후보 중 지금 자세에서 가장 적게 도는 것을 고른다 — 무작위로 고르면 리드인 0.2초 동안
         // 주사위가 제자리에서 중앙값 100도를 돌아 "던지기 전에 빙글 도는" 것처럼 보였다.
-        // 다양성은 궤적 선택이 만든다.
-        let offsets = (0..<slots.count).map { lane in
-            let yaw = Self.leastRotationYawChoice(
+        let yaws: [Int] = (0..<slots.count).map { lane in
+            if hinted != nil, let hint { return hint.yaws[lane] }
+            return Self.leastRotationYawChoice(
                 current: dice[slots[lane]].orientation, trajectory: trajectory, die: lane, showing: values[lane])
-            return FaceControl.offset(
-                restUpFace: trajectory.restUpFace(die: lane),
-                showing: values[lane],
-                yawChoice: yaw)
         }
+        let offsets = (0..<slots.count).map { lane in
+            FaceControl.offset(restUpFace: trajectory.restUpFace(die: lane), showing: values[lane], yawChoice: yaws[lane])
+        }
+        let outcome = RollOutcome(cues: trajectory.collisions, trajectoryID: trajectory.id,
+                                  direction: usedDirection, yaws: yaws)
 
         if skipAnimation {
             applyFrame(trajectory.frameCount - 1, of: trajectory, slots: slots, offsets: offsets)
             for cue in trajectory.collisions { onCue?(cue) }
-            return trajectory.collisions
+            return outcome
         }
         // 프레임 순으로 정렬돼 있으므로 커서 하나로 그 프레임에 도달할 때마다 알린다
         let cues = trajectory.collisions.sorted { $0.frame < $1.frame }
@@ -120,7 +139,7 @@ final class DiceStage {
         }
         // 마지막 프레임을 한 번 더 확정해 반올림 오차를 없앤다
         applyFrame(trajectory.frameCount - 1, of: trajectory, slots: slots, offsets: offsets)
-        return trajectory.collisions
+        return outcome
     }
 
     /// 다섯 개 전부의 자리를 정한다 — keep한 것은 뒤쪽 선반 위로, 나머지는 트레이 바닥으로.

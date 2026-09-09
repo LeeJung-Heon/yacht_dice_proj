@@ -356,10 +356,10 @@ final class GameSession {
 
         let direction = nextThrowDirection ?? ThrowDirection.allCases.randomElement() ?? .center
         nextThrowDirection = nil
-        let cues = await stage.roll(values: values, slots: slots,
-                                    direction: direction, skipAnimation: reduceMotion,
-                                    onCue: { [weak self] cue in self?.onCollisionCue?(cue) })
-        onCollisionCues?(cues)
+        let outcome = await stage.roll(values: values, slots: slots,
+                                       direction: direction, skipAnimation: reduceMotion,
+                                       onCue: { [weak self] cue in self?.onCollisionCue?(cue) })
+        onCollisionCues?(outcome.cues)
 
         // 착지한 뒤에 노출한다
         record.log.append(.rolled(values))

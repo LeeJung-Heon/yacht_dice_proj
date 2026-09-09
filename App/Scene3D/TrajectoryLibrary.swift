@@ -5,6 +5,7 @@ import DiceTrajectory
 final class TrajectoryLibrary: Sendable {
     let all: [Trajectory]
     private let index: [Key: [Trajectory]]
+    private let byID: [UInt16: Trajectory]
 
     private struct Key: Hashable {
         let dieCount: Int
@@ -18,7 +19,11 @@ final class TrajectoryLibrary: Sendable {
     init(data: Data) throws {
         all = try TrajectoryArchive.decode(data)
         index = Dictionary(grouping: all) { Key(dieCount: $0.dieCount, direction: $0.direction) }
+        byID = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
+
+    /// 상대가 보낸 힌트의 궤적. 없으면 nil.
+    func trajectory(id: UInt16) -> Trajectory? { byID[id] }
 
     static func bundled() throws -> TrajectoryLibrary {
         guard let url = Bundle.main.url(forResource: "trajectories", withExtension: "bin") else {

@@ -64,7 +64,7 @@ struct DiceStageTests {
     func 충돌_큐() async throws {
         let stage = DiceStage(library: try TrajectoryLibrary.bundled())
         let cues = await stage.roll(values: [2, 5, 1, 3, 6], slots: [0, 1, 2, 3, 4],
-                                    direction: .right, skipAnimation: true)
+                                    direction: .right, skipAnimation: true).cues
         #expect(!cues.isEmpty, "충돌 큐가 비어 있다 — 사운드와 햅틱을 붙일 수 없다")
     }
 }
@@ -95,5 +95,35 @@ struct DiceStageLeadInTests {
         #expect(abs(DiceStage.rotationAngle(from: a, to: b) - .pi / 2) < 1e-4)
         // q와 -q는 같은 회전이다
         #expect(DiceStage.rotationAngle(from: a, to: simd_quatf(vector: -a.vector)) < 1e-5)
+    }
+}
+
+@Suite("주사위 무대 - 힌트 재생")
+@MainActor
+struct DiceStageHintTests {
+    @Test("힌트를 주면 같은 궤적·회전으로 재생해 자세가 같다")
+    func 같은_자세() async throws {
+        let library = try TrajectoryLibrary.bundled()
+        let a = DiceStage(library: library), b = DiceStage(library: library)
+        let values = [2, 5, 1, 6, 3]
+        let first = await a.roll(values: values, slots: [0, 1, 2, 3, 4], direction: .left, skipAnimation: true)
+        let hint = ThrowHint(event: 0, trajectory: first.trajectoryID, direction: first.direction.rawValue, yaws: first.yaws)
+        let second = await b.roll(values: values, slots: [0, 1, 2, 3, 4], direction: .right, skipAnimation: true, hint: hint)
+        #expect(second.trajectoryID == first.trajectoryID && second.yaws == first.yaws)
+        for slot in 0..<5 {
+            let qa = a.orientation(slot: slot)!, qb = b.orientation(slot: slot)!
+            // 같은 궤적·오프셋이라도 float 정밀도 때문에 acos 근처에서 0.001rad쯤 흔들린다
+            #expect(DiceStage.rotationAngle(from: qa, to: qb) < 0.01, "슬롯 \(slot) 자세가 다르다")
+            #expect(b.faceUpValue(slot: slot) == values[slot])
+        }
+    }
+
+    @Test("없는 궤적 ID나 개수가 다른 힌트는 무시하고 정상 재생한다")
+    func 나쁜_힌트() async throws {
+        let stage = DiceStage(library: try TrajectoryLibrary.bundled())
+        let bad = ThrowHint(event: 0, trajectory: 65535, direction: 1, yaws: [0, 0, 0])
+        let outcome = await stage.roll(values: [4, 4, 4], slots: [0, 2, 4], direction: .center, skipAnimation: true, hint: bad)
+        #expect(outcome.trajectoryID != 65535)
+        #expect(stage.faceUpValue(slot: 0) == 4 && stage.faceUpValue(slot: 4) == 4)
     }
 }
