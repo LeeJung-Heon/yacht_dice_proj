@@ -19,9 +19,10 @@ struct SupabaseE2ETests {
         func remove(key: String) throws { values[key] = nil }
     }
 
-    private func makeClient() -> SupabaseClient {
+    private func makeClient(maxRetryAttempts: Int = RealtimeClientOptions.defaultMaxRetryAttempts) -> SupabaseClient {
         SupabaseClient(supabaseURL: SupabaseConfig.url, supabaseKey: SupabaseConfig.publishableKey,
-                       options: .init(auth: .init(storage: MemoryStorage())))
+                       options: .init(auth: .init(storage: MemoryStorage()),
+                                      realtime: .init(maxRetryAttempts: maxRetryAttempts)))
     }
 
     private struct ConstantDriver: MatchDriver {
@@ -104,6 +105,98 @@ struct SupabaseE2ETests {
         let final = try await host.fetchMatch(id: room.id)
         #expect(final.log == hostSession.record.log)
         #expect(final.eventCount == hostSession.record.log.events.count)
+    }
+
+    /// 호스트·게스트 세션 한 쌍을 만들어 구독이 붙을 때까지 기다린다.
+    private func makePair(realtimeForGuest: Bool = true) async throws
+        -> (host: SupabaseService, room: MatchRow, a: GameSession, b: GameSession, ta: SupabaseTurnTransport, tb: SupabaseTurnTransport) {
+        let host = SupabaseService(client: makeClient())
+        let guest = SupabaseService(client: makeClient())
+        await host.signIn(); await guest.signIn()
+        let room = try await host.createRoom(name: "A")
+        let joined = try await guest.joinRoom(code: room.code, name: "B")
+        let refreshed = try await host.fetchMatch(id: room.id)
+        let library = try TrajectoryLibrary.bundled()
+        let hostUid = try #require(host.uid)
+        let guestUid = try #require(guest.uid)
+        let hostRecord = try #require(refreshed.record(localUid: hostUid))
+        let guestRecord = try #require(joined.record(localUid: guestUid))
+        let ta = SupabaseTurnTransport(client: host.client, matchID: room.id)
+        let tb = SupabaseTurnTransport(client: guest.client, matchID: room.id, realtimeEnabled: realtimeForGuest)
+        let a = GameSession(driver: ConstantDriver(face: 3), stage: DiceStage(library: library), record: hostRecord, transport: ta)
+        let b = GameSession(driver: ConstantDriver(face: 5), stage: DiceStage(library: library), record: guestRecord, transport: tb)
+        a.reduceMotion = true; b.reduceMotion = true
+        a.startListening(); b.startListening()
+        let deadline = ContinuousClock.now + .seconds(8)
+        while !(ta.isSubscribed && (tb.isSubscribed || !realtimeForGuest)), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(ta.isSubscribed, "호스트 구독 실패: \(ta.subscribeError ?? "없음")")
+        return (host, refreshed, a, b, ta, tb)
+    }
+
+    @Test("호스트의 기록이 게스트의 내 차례가 되기까지 중앙값 1.5초 아래다")
+    func 지연() async throws {
+        let pair = try await makePair()
+        var samples: [Duration] = []
+        for turn in 0..<3 {
+            await pair.a.send(.roll)
+            let category: ScoreCategory = [.aces, .deuces, .threes][turn]
+            let started = ContinuousClock.now
+            await pair.a.send(.commit(category))
+            let deadline = started + .seconds(10)
+            while !pair.b.isLocalTurn, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+            samples.append(ContinuousClock.now - started)
+            #expect(pair.b.isLocalTurn)
+            // 게스트가 바로 되돌려 준다
+            await pair.b.send(.roll)
+            await pair.b.send(.commit(category))
+            let back = ContinuousClock.now + .seconds(10)
+            while !pair.a.isLocalTurn, ContinuousClock.now < back { try await Task.sleep(for: .milliseconds(10)) }
+        }
+        let sorted = samples.sorted()
+        let median = sorted[sorted.count / 2]
+        print("지연 표본 \(samples), 중앙값 \(median)")
+        #expect(median < .milliseconds(1500), "지연 표본: \(samples)")
+    }
+
+    @Test("게스트가 재생한 주사위 자세가 호스트와 같다")
+    func 자세_재현() async throws {
+        let pair = try await makePair()
+        await pair.a.send(.roll)
+        let deadline = ContinuousClock.now + .seconds(10)
+        while pair.b.visibleState.rollsRemaining != 2, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(50)) }
+        while pair.b.isBusy, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(50)) }
+        for slot in 0..<5 {
+            let qa = try #require(pair.a.stageOrientation(slot: slot))
+            let qb = try #require(pair.b.stageOrientation(slot: slot))
+            #expect(DiceStage.rotationAngle(from: qa, to: qb) < 0.01, "슬롯 \(slot) 자세가 다르다")
+        }
+    }
+
+    @Test("게스트가 채널에 들어오면 호스트의 opponentPresent가 참이 된다")
+    func 접속() async throws {
+        let pair = try await makePair()
+        let deadline = ContinuousClock.now + .seconds(8)
+        while !(pair.a.opponentPresent && pair.b.opponentPresent), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(pair.a.opponentPresent && pair.b.opponentPresent)
+        #expect(pair.a.isConnected && pair.b.isConnected)
+    }
+
+    @Test("참가자가 아닌 계정은 비공개 채널을 구독할 수 없다")
+    func 낯선_계정_거부() async throws {
+        let pair = try await makePair()
+        // 거부된 구독은 라이브러리가 다시 시도하므로 한 번만 시도하게 한다
+        let stranger = SupabaseService(client: makeClient(maxRetryAttempts: 1))
+        await stranger.signIn()
+        let transport = SupabaseTurnTransport(client: stranger.client, matchID: pair.room.id)
+        let deadline = ContinuousClock.now + .seconds(20)
+        while transport.subscribeError == nil, !transport.isSubscribed, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(!transport.isSubscribed && transport.subscribeError != nil, "낯선 계정이 구독됐다")
     }
 
     @Test("Realtime 없이 폴링만으로도 상대의 턴이 도착한다")
