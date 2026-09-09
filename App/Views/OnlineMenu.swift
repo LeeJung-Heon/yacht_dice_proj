@@ -54,6 +54,10 @@ struct OnlineMenu: View {
             nickname = service.nickname
             await service.signIn()
             resumeWaitingRoomIfAny()
+            // 상대가 턴을 끝내면 앱이 닫혀 있어도 알림이 오도록 이 기기를 등록한다
+            if service.uid != nil, !ProcessInfo.processInfo.arguments.contains("-noPush") {
+                await PushRegistration.shared.requestAndRegister(service: service)
+            }
         }
         .refreshable { await service.reloadMatches() }
         .onDisappear { waitTask?.cancel() }
@@ -174,11 +178,11 @@ struct OnlineMenu: View {
                         HStack {
                             Text(opponentName(of: row)).foregroundStyle(theme.ink)
                             Spacer()
-                            Text(isMyTurn(row) ? "내 차례" : "상대 차례")
+                            Text(row.isAbandoned ? "상대가 떠남" : isMyTurn(row) ? "내 차례" : "상대 차례")
                                 .font(.caption.weight(.semibold))
-                                .foregroundStyle(isMyTurn(row) ? theme.brassInk : theme.inkSecondary)
+                                .foregroundStyle(!row.isAbandoned && isMyTurn(row) ? theme.brassInk : theme.inkSecondary)
                                 .padding(.horizontal, 8).padding(.vertical, 3)
-                                .background(Capsule().fill(isMyTurn(row) ? theme.brass : theme.paperLine))
+                                .background(Capsule().fill(!row.isAbandoned && isMyTurn(row) ? theme.brass : theme.paperLine))
                         }
                         .contentShape(Rectangle())
                     }

@@ -99,9 +99,11 @@ SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
 
 ## 온라인 대전
 
-온라인 대전은 Supabase 무료 티어(프로젝트 `yacht-dice`, 서울)로 동작하며, 기기마다 익명 로그인으로 계정 하나를 받고 6자리 방 코드로 상대와 만나며, 한 판은 `public.matches` 행 하나이고 매치 데이터는 `MatchLog` JSON 그대로다. 굴림·고정·기록 이벤트가 생길 때마다 행을 갱신하고 상대는 Realtime으로 그 행의 UPDATE를 받아 `GameState.canApply`로 검증한 뒤 재생하므로 상대의 플레이가 굴림 단위로 실시간에 가깝게(200~300ms) 보이며, 규칙 위반은 막지만 주사위는 각 클라이언트가 굴려 조작된 클라이언트의 "운 좋은 눈"은 막지 못한다(스펙 P2/P3 §7.4). 서버 쪽 RLS는 참가자만 행을 읽고 갱신하게 하고, 방 입장은 `join_match` 함수가 대기 중인 빈 자리에만 넣으며, 좌석 교체는 트리거가 막는다.
+온라인 대전은 Supabase 무료 티어(프로젝트 `yacht-dice`, 서울)로 동작하며, 기기마다 익명 로그인으로 계정 하나를 받고 6자리 방 코드로 상대와 만나며, 한 판은 `public.matches` 행 하나이고 매치 데이터는 `MatchLog` JSON 그대로다. 굴림·고정·기록 이벤트가 생길 때마다 행을 갱신하면 DB 트리거 `matches_broadcast`가 `realtime.broadcast_changes`로 비공개 채널 `match:<id>`에 행 전체를 쏘고, 상대는 그 채널을 세션 토큰으로 구독해 새 이벤트만 `GameState.canApply`로 검증한 뒤 재생하므로 기록부터 상대의 내 차례까지 0.1초 안팎이 걸리며, 소켓이 끊긴 사이의 변경은 3초 폴링이 같은 행을 읽어 채우고 앱이 앞으로 돌아오면 한 번 더 읽는다. 굴린 쪽은 궤적 ID·방향·회전 선택을 `throws` 열에 이벤트 번호와 함께 적어 두고 받는 쪽은 같은 값으로 재생하므로 두 화면이 같은 던지기를 보며, 같은 채널의 Presence로 상대의 접속을 명패의 점으로, 채널 상태로 연결 끊김을 띠로 보여 준다. 규칙 위반은 막지만 주사위는 각 클라이언트가 굴려 조작된 클라이언트의 "운 좋은 눈"은 막지 못하고(스펙 P2/P3 §7.4), 서버 쪽 RLS는 참가자만 행을 읽고 갱신하게 하며 `realtime.messages` 정책이 참가자만 그 토픽을 받게 하고, 방 입장은 `join_match` 함수가 대기 중인 빈 자리에만 넣으며, 좌석 교체는 트리거가 막고, 3일 넘게 멈춘 판은 `pg_cron`이 10분마다 `abandoned`로 바꿔 목록에 "상대가 떠남"으로 보인다.
 
-검증은 세 층으로 되어 있는데, 메모리 전송으로 두 세션이 12턴을 완주하는 단위 테스트, `YACHT_SUPABASE_E2E=1`을 주면 실제 프로젝트에 익명 계정 둘로 방 만들기·입장·턴 왕복을 확인하는 통합 테스트(`SupabaseE2ETests`), 그리고 시뮬레이터 두 대가 화면에서 코드로 만나 턴을 주고받는 것까지 확인했다.
+앱이 닫혀 있어도 차례가 오면 알림이 오는데, 온라인 메뉴에 들어올 때 알림 권한을 묻고 APNs 토큰을 `device_tokens`에 올리며, 내 턴이 끝나 `turn_seat`가 바뀌거나 게스트가 들어오면 트리거 `matches_turn_webhook`가 `pg_net`으로 Edge Function `notify-turn`을 부르고, 함수는 알릴 좌석의 토큰을 읽어 APNs(HTTP/2, ES256 JWT)로 "내 차례"를 보내며 죽은 토큰은 지우고, 알림을 탭하면 그 판이 열린다. 함수 시크릿은 `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`(.p8 본문), `APNS_BUNDLE_ID`, `WEBHOOK_SECRET`이며 `supabase secrets set --project-ref lkernselwouldtuialjh`로 넣고, `WEBHOOK_SECRET`은 Vault의 `webhook_secret`과 같은 값이어야 하며, 서버 SQL은 `supabase/migrations/`에, 함수는 `supabase/functions/notify-turn/`에 있고 JWT 생성은 `deno test supabase/functions/notify-turn/`으로 검증한다.
+
+검증은 세 층으로 되어 있는데, 메모리 전송으로 두 세션이 12턴을 완주하고 힌트로 같은 자세에 멈추는 단위 테스트, `YACHT_SUPABASE_E2E=1`을 주면 실제 프로젝트에 익명 계정 둘로 방 만들기·입장·턴 왕복과 전달 지연(중앙값 1.5초 아래), 낯선 계정의 구독 거부, Presence, 자세 재현, 폴링만으로의 전달을 확인하는 통합 테스트(`SupabaseE2ETests`), 그리고 시뮬레이터 두 대가 화면에서 코드로 만나 턴을 주고받는 것까지 확인했다.
 
 ```sh
 TEST_RUNNER_YACHT_SUPABASE_E2E=1 xcodebuild -project YachtDice.xcodeproj -scheme YachtDice \
@@ -109,7 +111,7 @@ TEST_RUNNER_YACHT_SUPABASE_E2E=1 xcodebuild -project YachtDice.xcodeproj -scheme
   -only-testing:YachtDiceTests/SupabaseE2ETests test
 ```
 
-푸시 알림이 없어 상대가 앱을 열어 있어야 턴이 전달되고 익명 계정은 앱을 지우면 사라지므로 진행 중인 매치도 함께 잃으며, 서버 설정은 대시보드에서 Anonymous sign-ins를 켜 두어야 한다. Game Center 턴제 매치 코드(`GameCenterService`, `GameCenterTurnTransport`, `MatchmakerView`)는 유료 개발자 계정을 만든 뒤 쓰도록 `App/Online`에 남겨 두었고, 켜려면 Apple Developer 포털에서 앱 ID에 Game Center를 활성화하고 온라인 메뉴를 Game Center 버전으로 되돌리면 된다.
+익명 계정은 앱을 지우면 사라지므로 진행 중인 매치도 함께 잃으며, 서버 설정은 대시보드에서 Anonymous sign-ins를 켜 두어야 한다. Game Center 턴제 매치 코드(`GameCenterService`, `GameCenterTurnTransport`, `MatchmakerView`)는 `App/Online`에 남겨 두었고, 켜려면 Apple Developer 포털에서 앱 ID에 Game Center를 활성화하고 엔타이틀먼트에 Game Center 키를 되살린 뒤 온라인 메뉴를 Game Center 버전으로 되돌리면 된다.
 
 ## 궤적 다시 굽기
 

@@ -10,6 +10,9 @@ struct GameScreen: View {
     @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    /// 채널이 3초 넘게 끊겨 있을 때만 띠를 보인다. 짧은 재접속은 조용히 지나간다.
+    @State private var showDisconnected = false
+    @State private var disconnectTask: Task<Void, Never>?
     @State private var feedback = FeedbackCoordinator()
     /// 점수판에 펼친 좌석. nil이면 현재 차례를 따라간다.
     @State private var viewedSeat: Int?
@@ -54,6 +57,18 @@ struct GameScreen: View {
                 }
             }
             .overlay(alignment: .top) {
+                if showDisconnected {
+                    Label("연결 끊김 — 재연결 중", systemImage: "wifi.slash")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(theme.ink.opacity(0.85), in: Capsule())
+                        .foregroundStyle(theme.paper)
+                        .padding(.top, session.participants.count > 1 ? 118 : 60)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .accessibilityIdentifier("online.connection")
+                }
+            }
+            .overlay(alignment: .top) {
                 if let error = session.lastTransportError {
                     Text(error)
                         .font(.caption)
@@ -88,6 +103,18 @@ struct GameScreen: View {
         .onChange(of: session.visibleState.currentPlayer, initial: true) { _, seat in
             viewedSeat = nil
             showTurnBanner(for: seat)
+        }
+        .onChange(of: session.isConnected, initial: true) { _, connected in
+            disconnectTask?.cancel()
+            if connected {
+                withAnimation { showDisconnected = false }
+            } else {
+                disconnectTask = Task {
+                    try? await Task.sleep(for: .seconds(3))
+                    guard !Task.isCancelled else { return }
+                    withAnimation { showDisconnected = true }
+                }
+            }
         }
         .onChange(of: session.lastOpponentCommit?.id) { _, _ in
             guard let commit = session.lastOpponentCommit else { return }

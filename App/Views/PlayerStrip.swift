@@ -24,6 +24,14 @@ struct PlayerStrip: View {
                 VStack(spacing: 2) {
                     HStack(spacing: 4) {
                         if case .bot = participant { Image(systemName: "cpu").font(.caption2) }
+                        if case .remote = participant {
+                            // 같은 채널에 있으면 초록, 없으면 회색
+                            Circle()
+                                .fill(session.opponentPresent ? Color.green : theme.inkSecondary.opacity(0.5))
+                                .frame(width: 7, height: 7)
+                                .accessibilityIdentifier("players.presence.\(index)")
+                                .accessibilityLabel(session.opponentPresent ? "접속 중" : "자리 비움")
+                        }
                         Text(participant.displayName).font(.caption).lineLimit(1)
                     }
                     Text("\(total)")
@@ -42,10 +50,15 @@ struct PlayerStrip: View {
                 .buttonStyle(.plain)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("players.seat.\(index)")
-                .accessibilityLabel("\(participant.displayName), 총점 \(total)점\(isCurrent ? ", 현재 차례" : "")")
+                .accessibilityLabel("\(participant.displayName), 총점 \(total)점\(isCurrent ? ", 현재 차례" : "")\(presenceLabel(for: participant))")
                 .accessibilityHint("탭하면 이 사람의 점수판을 본다")
             }
         }
         .padding(.horizontal, 16)
+    }
+
+    private func presenceLabel(for participant: Participant) -> String {
+        guard case .remote = participant else { return "" }
+        return session.opponentPresent ? ", 접속 중" : ", 자리 비움"
     }
 }

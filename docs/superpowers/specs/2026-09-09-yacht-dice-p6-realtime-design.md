@@ -1,7 +1,7 @@
 # Yacht Dice — P6: 온라인 대전 실시간 고도화 설계
 
 - 작성일: 2026-09-09
-- 상태: 승인됨 (2026-09-09, 목표 A·B와 푸시 포함)
+- 상태: 구현 완료 (2026-09-09). 통합 테스트로 지연 중앙값 0.1초 안팎, 권한·Presence·자세 재현을 확인했고 푸시는 실기기 확인이 남았다
 - 선행: P5 Supabase 방 코드 온라인 (`2026-09-07-yacht-dice-p5-supabase-online-design.md`)
 - 범위: 전달 지연과 재현(A), 가용성과 푸시 알림(B). 서버 주사위와 자동 매칭(C)은 다음 스펙이다.
 
@@ -52,7 +52,7 @@ create policy "participants send presence" on realtime.messages
 - `device_tokens(uid uuid, token text primary key, platform text default 'ios', updated_at)`이며 RLS는 자기 행만 쓰고 읽게 한다.
 - 클라이언트는 온라인 메뉴에 들어올 때 알림 권한을 묻고 APNs 토큰을 받아 upsert한다.
 - 클라이언트는 `endTurn`·`endMatch`에서 `turn_seat`(다음 차례 좌석, 끝나면 null)를 함께 갱신한다.
-- 트리거 `matches_turn_webhook`는 `turn_seat`가 바뀌거나 `guest_uid`가 채워질 때 `supabase_functions.http_request`로 Edge Function `notify-turn`을 부른다.
+- 트리거 `matches_turn_webhook`는 `turn_seat`가 바뀌거나 `guest_uid`가 채워질 때 `pg_net`의 `net.http_post`로 Edge Function `notify-turn`을 부르며, 비밀 헤더 `X-Webhook-Secret`은 Vault의 `webhook_secret`에서 읽는다.
 - `notify-turn`은 행에서 알릴 좌석의 uid를 고르고(차례가 바뀌면 그 좌석, 게스트 입장이면 호스트) `device_tokens`에서 토큰을 읽어 APNs(`api.push.apple.com`, HTTP/2, ES256 JWT)로 `{"aps":{"alert":{"title":"내 차례","body":"<상대>이(가) 두었다"},"sound":"default"},"matchID":"<id>"}`를 보낸다. 키는 Supabase 시크릿 `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`, `APNS_BUNDLE_ID`다. 410/400 `BadDeviceToken`이면 토큰을 지운다.
 - 앱은 알림을 탭하면 `matchID`로 행을 읽어 `openSupabaseMatch`로 연다.
 

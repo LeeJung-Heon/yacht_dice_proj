@@ -10,7 +10,7 @@ final class FullGameUITests: XCTestCase {
     @MainActor
     func test_12턴을_완주한다() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetMatch"]
+        app.launchArguments = ["-resetMatch", "-noPush"]
         app.launch()
 
         let solo = app.buttons["menu.solo"]
@@ -54,7 +54,7 @@ final class FullGameUITests: XCTestCase {
     @MainActor
     func test_재시작_후_진행이_복원된다() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetMatch"]
+        app.launchArguments = ["-resetMatch", "-noPush"]
         app.launch()
 
         let solo = app.buttons["menu.solo"]
@@ -121,6 +121,9 @@ extension XCUIElement {
                 let scrollView = app.scrollViews.firstMatch
                 if scrollView.exists, frame.maxY > scrollView.frame.maxY {
                     scrollView.swipeUp()
+                } else if scrollView.exists, frame.minY < scrollView.frame.minY {
+                    // 위로 벗어났으면(앞선 스와이프가 지나쳤을 때) 되돌린다
+                    scrollView.swipeDown()
                 }
             }
             _ = app.wait(for: .runningForeground, timeout: 0.2)

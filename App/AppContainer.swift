@@ -42,6 +42,25 @@ final class AppContainer {
         }
         savedRecord = store.load()
         gameCenter.onMatchOpened = { [weak self] match in self?.startOnlineMatch(match) }
+        PushRegistration.shared.currentMatchID = { [weak self] in
+            guard let self, case .playing(let session) = self.status,
+                  case .online(let id) = session.record.mode else { return nil }
+            return UUID(uuidString: id)
+        }
+        PushRegistration.shared.onOpenMatch = { [weak self] id in
+            Task { await self?.openOnlineMatchID(id) }
+        }
+    }
+
+    /// 푸시 알림을 탭했을 때. 행을 읽어 연다. 이미 그 판을 플레이 중이면 세션을 새로 만들지 않는다.
+    func openOnlineMatchID(_ id: UUID) async {
+        if case .playing(let session) = status, session.record.mode == .online(matchID: id.uuidString) { return }
+        await supabase.signIn()
+        guard let row = try? await supabase.fetchMatch(id: id) else {
+            onlineError = "매치를 읽지 못했다"
+            return
+        }
+        openSupabaseMatch(row)
     }
 
     func startGame(mode: GameMode) {

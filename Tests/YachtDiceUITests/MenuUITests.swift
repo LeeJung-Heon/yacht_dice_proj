@@ -7,7 +7,7 @@ final class MenuUITests: XCTestCase {
     @MainActor
     func test_컴퓨터_대전_한_턴() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetMatch"]
+        app.launchArguments = ["-resetMatch", "-noPush"]
         app.launch()
 
         let bot = app.buttons["menu.bot"]
@@ -38,7 +38,7 @@ final class MenuUITests: XCTestCase {
     @MainActor
     func test_로컬_2인_핸드오프() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetMatch"]
+        app.launchArguments = ["-resetMatch", "-noPush"]
         app.launch()
 
         let local = app.buttons["menu.local"]
@@ -64,7 +64,7 @@ final class MenuUITests: XCTestCase {
     @MainActor
     func test_메뉴로_돌아가면_이어하기가_있다() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetMatch"]
+        app.launchArguments = ["-resetMatch", "-noPush"]
         app.launch()
         let solo = app.buttons["menu.solo"]
         XCTAssertTrue(solo.waitForExistence(timeout: 10))
@@ -82,7 +82,7 @@ extension MenuUITests {
     @MainActor
     func test_온라인_대전_화면이_열린다() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetMatch"]
+        app.launchArguments = ["-resetMatch", "-noPush"]
         app.launch()
         let online = app.buttons["menu.online"]
         XCTAssertTrue(online.waitForExistence(timeout: 10))
@@ -96,7 +96,7 @@ extension MenuUITests {
     @MainActor
     func test_설정_시트가_열린다() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetMatch"]
+        app.launchArguments = ["-resetMatch", "-noPush"]
         app.launch()
         let settings = app.buttons["menu.settings"]
         XCTAssertTrue(settings.waitForExistence(timeout: 10))

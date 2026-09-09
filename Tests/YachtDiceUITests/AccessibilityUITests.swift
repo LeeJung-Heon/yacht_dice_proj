@@ -12,7 +12,7 @@ final class AccessibilityUITests: XCTestCase {
     @MainActor
     func test_접근성_트리가_게임_상태를_말로_전달한다() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetMatch"]
+        app.launchArguments = ["-resetMatch", "-noPush"]
         app.launch()
 
         let solo = app.buttons["menu.solo"]
