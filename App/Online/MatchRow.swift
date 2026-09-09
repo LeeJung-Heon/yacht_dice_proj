@@ -13,16 +13,46 @@ struct MatchRow: Codable, Equatable, Sendable {
     var eventCount: Int
     var status: String
     var totals: [Int]?
+    /// 굴림마다의 궤적 힌트. 열 이름은 `throws`.
+    var hints: [ThrowHint] = []
+    /// 다음에 둘 좌석. 끝났거나 대기 중이면 nil.
+    var turnSeat: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, code, log, status, totals
         case hostUid = "host_uid", guestUid = "guest_uid"
         case hostName = "host_name", guestName = "guest_name"
         case eventCount = "event_count"
+        case hints = "throws"
+        case turnSeat = "turn_seat"
+    }
+
+    init(id: UUID, code: String, hostUid: UUID, guestUid: UUID?, hostName: String, guestName: String?,
+         log: MatchLog, eventCount: Int, status: String, totals: [Int]?, hints: [ThrowHint] = [], turnSeat: Int? = nil) {
+        self.id = id; self.code = code; self.hostUid = hostUid; self.guestUid = guestUid
+        self.hostName = hostName; self.guestName = guestName; self.log = log; self.eventCount = eventCount
+        self.status = status; self.totals = totals; self.hints = hints; self.turnSeat = turnSeat
+    }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        code = try c.decode(String.self, forKey: .code)
+        hostUid = try c.decode(UUID.self, forKey: .hostUid)
+        guestUid = try c.decodeIfPresent(UUID.self, forKey: .guestUid)
+        hostName = try c.decode(String.self, forKey: .hostName)
+        guestName = try c.decodeIfPresent(String.self, forKey: .guestName)
+        log = try c.decode(MatchLog.self, forKey: .log)
+        eventCount = try c.decode(Int.self, forKey: .eventCount)
+        status = try c.decode(String.self, forKey: .status)
+        totals = try c.decodeIfPresent([Int].self, forKey: .totals)
+        hints = try c.decodeIfPresent([ThrowHint].self, forKey: .hints) ?? []
+        turnSeat = try c.decodeIfPresent(Int.self, forKey: .turnSeat)
     }
 
     var isWaiting: Bool { status == "waiting" }
     var isFinished: Bool { status == "finished" }
+    var isAbandoned: Bool { status == "abandoned" }
 
     /// 좌석은 항상 [호스트, 게스트]. 내 uid가 어느 쪽인지로 human/remote를 정한다.
     func seats(localUid: UUID) -> [SeatPlayer] {

@@ -3,6 +3,7 @@ import Observation
 import YachtCore
 import YachtBot
 import DiceTrajectory
+import simd
 
 /// 코어·드라이버·3D 연출을 잇는 유일한 오케스트레이터.
 ///
@@ -53,10 +54,18 @@ final class GameSession {
     // MARK: 온라인
     private let transport: (any TurnTransport)?
     private var listenTask: Task<Void, Never>?
+    private var presenceTask: Task<Void, Never>?
+    private var connectionTask: Task<Void, Never>?
     /// 도착한 로그를 재생 중인 Task. 재생은 굴림마다 3D를 기다리므로 순서를 지켜야 한다.
     private var replayTask: Task<Void, Never>?
     /// 상대가 보낸 로그를 받아들일 수 없었을 때의 이유. 화면에 배너로 보인다.
     private(set) var lastTransportError: String?
+    /// 이 판의 굴림마다 고른 궤적·회전. 상대에게 보내 같은 던지기를 보여 준다.
+    private(set) var throwHints: [ThrowHint] = []
+    /// 원격 상대가 같은 채널에 있는가.
+    private(set) var opponentPresent = false
+    /// 전송 채널이 살아 있는가. 온라인이 아니면 항상 참.
+    private(set) var isConnected = true
 
     init(driver: any MatchDriver, stage: DiceStage, record: MatchRecord,
          transport: (any TurnTransport)? = nil) {
@@ -110,16 +119,39 @@ final class GameSession {
     func startListening() {
         guard let transport, listenTask == nil else { return }
         listenTask = Task { [weak self] in
-            for await log in transport.incomingLogs {
+            for await update in transport.incoming {
                 guard let self else { return }
                 let previous = replayTask
                 replayTask = Task { @MainActor in
                     await previous?.value
-                    await self.replay(remote: log)
+                    await self.replay(remote: update)
                 }
             }
         }
+        let remoteID = remotePlayerID
+        presenceTask = Task { [weak self] in
+            for await present in transport.presence {
+                guard let self else { return }
+                self.opponentPresent = remoteID.map { present.contains($0) } ?? !present.isEmpty
+            }
+        }
+        connectionTask = Task { [weak self] in
+            for await connected in transport.connection {
+                self?.isConnected = connected
+            }
+        }
     }
+
+    /// 원격 좌석의 플레이어 ID. 온라인이 아니면 nil.
+    private var remotePlayerID: String? {
+        for participant in participants {
+            if case .remote(let playerID, _) = participant { return playerID }
+        }
+        return nil
+    }
+
+    /// 테스트용: 무대의 주사위 자세.
+    func stageOrientation(slot: Int) -> simd_quatf? { stage.orientation(slot: slot) }
 
     /// 테스트용: 도착한 로그를 전부 재생할 때까지 기다린다.
     /// 로그가 아직 도착하지 않았을 수 있으므로 잠깐(최대 2초) 기다린 뒤,
@@ -151,6 +183,7 @@ final class GameSession {
         visibleState = record.log.state
         nextThrowDirection = nil
         pendingHandoff = false
+        throwHints = []
         stage.reset()
         onLogChanged?(record)
         scheduleTurnOwner(announceHandoff: false)
@@ -218,7 +251,7 @@ final class GameSession {
     private func publishProgressIfOnline() async {
         guard let transport else { return }
         do {
-            try await transport.publishProgress(log: record.log)
+            try await transport.publishProgress(log: record.log, hints: throwHints)
             lastTransportError = nil
         } catch {
             lastTransportError = "서버에 보내지 못해 다시 시도하는 중이다"
@@ -230,9 +263,10 @@ final class GameSession {
         guard let transport else { return }
         do {
             if visibleState.phase == .finished {
-                try await transport.endMatch(log: record.log, totals: visibleState.scorecards.map(\.total))
+                try await transport.endMatch(log: record.log, hints: throwHints,
+                                             totals: visibleState.scorecards.map(\.total))
             } else if case .remote = currentParticipant {
-                try await transport.endTurn(log: record.log)
+                try await transport.endTurn(log: record.log, hints: throwHints, nextSeat: visibleState.currentPlayer)
             }
             lastTransportError = nil
         } catch {
@@ -252,7 +286,12 @@ final class GameSession {
 
     /// 상대가 보낸 로그에서 내가 모르는 이벤트만 검증하며 재생한다.
     /// 굴림은 3D로 보여주고, 고정·기록은 적용한 뒤 잠깐 멈춰 눈으로 따라올 시간을 준다.
-    private func replay(remote log: MatchLog) async {
+    private func replay(remote update: RemoteUpdate) async {
+        let log = update.log
+        // 상대의 힌트를 합친다 (같은 이벤트 번호는 하나만)
+        for hint in update.hints where !throwHints.contains(where: { $0.event == hint.event }) {
+            throwHints.append(hint)
+        }
         let mine = record.log.events
         guard log.playerCount == record.log.playerCount,
               log.events.count > mine.count,
@@ -261,7 +300,8 @@ final class GameSession {
             if log.events.count > mine.count { lastTransportError = "상대의 기록이 내 기록과 어긋난다" }
             return
         }
-        for event in log.events.dropFirst(mine.count) {
+        for (offset, event) in log.events.dropFirst(mine.count).enumerated() {
+            let eventIndex = mine.count + offset
             guard visibleState.canApply(event) else {
                 lastTransportError = "상대가 보낸 이벤트가 규칙에 맞지 않는다: \(event)"
                 return
@@ -270,9 +310,10 @@ final class GameSession {
             switch event {
             case .rolled(let values):
                 let slots = visibleState.rollableIndices
+                let hint = throwHints.first { $0.event == eventIndex }
                 _ = await stage.roll(values: values, slots: slots,
                                      direction: ThrowDirection.allCases.randomElement() ?? .center,
-                                     skipAnimation: reduceMotion,
+                                     skipAnimation: reduceMotion, hint: hint,
                                      onCue: { [weak self] cue in self?.onCollisionCue?(cue) })
                 record.log.append(event)
                 visibleState = visibleState.applying(event)
@@ -361,7 +402,9 @@ final class GameSession {
                                        onCue: { [weak self] cue in self?.onCollisionCue?(cue) })
         onCollisionCues?(outcome.cues)
 
-        // 착지한 뒤에 노출한다
+        // 착지한 뒤에 노출한다. 이 굴림의 이벤트 번호에 힌트를 매긴다.
+        throwHints.append(ThrowHint(event: record.log.events.count, trajectory: outcome.trajectoryID,
+                                    direction: outcome.direction.rawValue, yaws: outcome.yaws))
         record.log.append(.rolled(values))
         visibleState = pending
         try? await driver.submit(.rolled(values))

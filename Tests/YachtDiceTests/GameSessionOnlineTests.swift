@@ -72,6 +72,26 @@ struct GameSessionOnlineTests {
         #expect(a.lastOpponentCommit == nil, "내가 기록한 것은 알림이 아니다")
     }
 
+    @Test("상대의 굴림이 내 화면에서도 같은 자세로 멈춘다")
+    func 같은_던지기() async throws {
+        let (a, b) = try makePair()
+        await a.send(.roll)
+        await b.waitForIncoming()
+        for slot in 0..<5 {
+            let qa = try #require(a.stageOrientation(slot: slot))
+            let qb = try #require(b.stageOrientation(slot: slot))
+            #expect(DiceStage.rotationAngle(from: qa, to: qb) < 0.01, "슬롯 \(slot) 자세가 다르다")
+        }
+    }
+
+    @Test("메모리 전송의 presence로 상대 접속이 보인다")
+    func 접속_표시() async throws {
+        let (a, _) = try makePair()
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !a.opponentPresent, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(a.opponentPresent)
+    }
+
     @Test("두 세션이 12턴을 완주하고 로그가 같다")
     func 완주() async throws {
         let (a, b) = try makePair()
@@ -96,7 +116,7 @@ struct GameSessionOnlineTests {
         b.reduceMotion = true; b.startListening()
         var forged = MatchLog(playerCount: 2)
         forged.append(.committed(.yacht, 50))   // 굴리지도 않고 기록
-        try await ta.endTurn(log: forged)
+        try await ta.endTurn(log: forged, hints: [], nextSeat: 1)
         await b.waitForIncoming()
         #expect(b.visibleState.scorecards[0].entry(.yacht) == nil)
         #expect(b.lastTransportError != nil)
