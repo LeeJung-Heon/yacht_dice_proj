@@ -111,7 +111,7 @@ TEST_RUNNER_YACHT_SUPABASE_E2E=1 xcodebuild -project YachtDice.xcodeproj -scheme
   -only-testing:YachtDiceTests/SupabaseE2ETests test
 ```
 
-익명 계정은 앱을 지우면 사라지므로 진행 중인 매치도 함께 잃으며, 서버 설정은 대시보드에서 Anonymous sign-ins를 켜 두어야 한다. Game Center 턴제 매치 코드(`GameCenterService`, `GameCenterTurnTransport`, `MatchmakerView`)는 `App/Online`에 남겨 두었고, 켜려면 Apple Developer 포털에서 앱 ID에 Game Center를 활성화하고 엔타이틀먼트에 Game Center 키를 되살린 뒤 온라인 메뉴를 Game Center 버전으로 되돌리면 된다.
+익명 계정은 앱을 지우면 사라지므로 진행 중인 매치도 함께 잃으며, 서버 설정은 대시보드에서 Anonymous sign-ins를 켜 두어야 하고, 익명 가입은 같은 IP에서 시간당 30회로 제한되어 통합 테스트를 한 시간에 여러 번 돌리면 `notSignedIn`(HTTP 429)으로 실패하므로 한 시간 뒤에 다시 돌린다. Game Center 턴제 매치 코드(`GameCenterService`, `GameCenterTurnTransport`, `MatchmakerView`)는 `App/Online`에 남겨 두었고, 켜려면 Apple Developer 포털에서 앱 ID에 Game Center를 활성화하고 엔타이틀먼트에 Game Center 키를 되살린 뒤 온라인 메뉴를 Game Center 버전으로 되돌리면 된다.
 
 ## 궤적 다시 굽기
 

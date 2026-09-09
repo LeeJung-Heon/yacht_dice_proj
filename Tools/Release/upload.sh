@@ -32,8 +32,11 @@ if ! xcodebuild -exportArchive -archivePath "$OUT/YachtDice.xcarchive" \
   -allowProvisioningUpdates "${AUTH[@]}" | tail -5; then
   echo "API 키로 내보내기 실패 — Xcode 계정으로 다시 시도한다"
   rm -rf "$OUT/export"
-  xcodebuild -exportArchive -archivePath "$OUT/YachtDice.xcarchive" \
+  if ! xcodebuild -exportArchive -archivePath "$OUT/YachtDice.xcarchive" \
     -exportOptionsPlist Tools/Release/ExportOptions.plist -exportPath "$OUT/export" \
-    -allowProvisioningUpdates | tail -5
+    -allowProvisioningUpdates | tail -5; then
+    echo "내보내기 실패. Xcode → Settings → Accounts에서 팀 $DEVELOPMENT_TEAM 계정에 다시 로그인한 뒤 다시 실행한다." >&2
+    exit 1
+  fi
 fi
 echo "업로드했다. App Store Connect → TestFlight에서 처리 완료를 기다린다."
