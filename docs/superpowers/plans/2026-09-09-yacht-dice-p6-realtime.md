@@ -50,7 +50,7 @@
 **Interfaces:**
 - Produces: `matches.throws jsonb`, `matches.turn_seat smallint`, `matches.status` 값 `abandoned`, 비공개 토픽 `match:<id>`의 브로드캐스트 이벤트 `UPDATE`(payload `record` = 행), Presence 허용.
 
-- [ ] **Step 1: SQL 작성**
+- [x] **Step 1: SQL 작성**
 
 ```sql
 -- 힌트와 다음 차례 좌석
@@ -117,9 +117,9 @@ create extension if not exists pg_cron with schema pg_catalog;
 select cron.schedule('mark-abandoned-matches', '*/10 * * * *', $$select public.mark_abandoned_matches()$$);
 ```
 
-- [ ] **Step 2: 적용** — MCP `apply_migration`(name `broadcast_throws`)으로 적용하고 같은 SQL을 파일로 저장한다. `pg_cron`이 없다고 나오면 대시보드 Database → Extensions에서 켠 뒤 다시 적용한다.
-- [ ] **Step 3: 검증** — MCP `execute_sql`로 `begin; update public.matches set event_count = event_count where false; rollback;`가 오류 없이 돌고, `select count(*) from realtime.messages`가 접근되며(0 이상), `get_advisors(security)`에 새 경고가 `matches_broadcast`·`mark_abandoned_matches`의 security definer 외에는 없는지 본다.
-- [ ] **Step 4: 커밋** — `feat(server): 매치 갱신을 비공개 채널로 브로드캐스트하고 힌트 열을 더한다`
+- [x] **Step 2: 적용** — MCP `apply_migration`(name `broadcast_throws`)으로 적용하고 같은 SQL을 파일로 저장한다. `pg_cron`이 없다고 나오면 대시보드 Database → Extensions에서 켠 뒤 다시 적용한다.
+- [x] **Step 3: 검증** — MCP `execute_sql`로 `begin; update public.matches set event_count = event_count where false; rollback;`가 오류 없이 돌고, `select count(*) from realtime.messages`가 접근되며(0 이상), `get_advisors(security)`에 새 경고가 `matches_broadcast`·`mark_abandoned_matches`의 security definer 외에는 없는지 본다.
+- [x] **Step 4: 커밋** — `feat(server): 매치 갱신을 비공개 채널로 브로드캐스트하고 힌트 열을 더한다`
 
 ---
 
@@ -146,7 +146,7 @@ func roll(values: [Int], slots: [Int], direction: ThrowDirection, skipAnimation:
 ```
 힌트가 있고 그 궤적이 존재하며 `dieCount == slots.count`이면 그 궤적·방향·yaw를 쓰고, 아니면 지금처럼 고른다. 기존 호출부는 `.cues`를 쓴다.
 
-- [ ] **Step 1: 실패하는 테스트**
+- [x] **Step 1: 실패하는 테스트**
 
 `Tests/YachtDiceTests/ThrowHintTests.swift`:
 ```swift
@@ -196,8 +196,8 @@ struct DiceStageHintTests {
 }
 ```
 
-- [ ] **Step 2: 실패 확인** — 컴파일 에러.
-- [ ] **Step 3: 구현**
+- [x] **Step 2: 실패 확인** — 컴파일 에러.
+- [x] **Step 3: 구현**
 
 `App/Online/ThrowHint.swift`:
 ```swift
@@ -254,8 +254,8 @@ struct ThrowHint: Codable, Equatable, Sendable {
 ```
 기존 호출부(`GameSession.performRoll`, `replay`, `AppContainer.launch`, `DiceStageTests`)는 `_ = await stage.roll(...)` 또는 `.cues`로 맞춘다.
 
-- [ ] **Step 4: 통과 확인** — `-only-testing:YachtDiceTests`.
-- [ ] **Step 5: 커밋** — `feat(dice): 궤적 힌트로 같은 던지기를 재생한다`
+- [x] **Step 4: 통과 확인** — `-only-testing:YachtDiceTests`.
+- [x] **Step 5: 커밋** — `feat(dice): 궤적 힌트로 같은 던지기를 재생한다`
 
 ---
 
@@ -286,7 +286,7 @@ private(set) var isConnected = true
 ```
 `InMemoryTurnTransport`는 `throws`를 함께 넘기고 presence는 `pair()` 시 서로의 uid("a"/"b")를 곧바로 흘린다.
 
-- [ ] **Step 1: 실패하는 테스트**
+- [x] **Step 1: 실패하는 테스트**
 
 `TurnTransportTests`의 기존 테스트를 `incoming`·`RemoteUpdate`로 바꾸고 추가:
 ```swift
@@ -322,8 +322,8 @@ private(set) var isConnected = true
 ```
 `GameSession`에 테스트용 `func stageOrientation(slot: Int) -> simd_quatf? { stage.orientation(slot: slot) }`를 둔다.
 
-- [ ] **Step 2: 실패 확인** — 컴파일 에러.
-- [ ] **Step 3: 구현**
+- [x] **Step 2: 실패 확인** — 컴파일 에러.
+- [x] **Step 3: 구현**
 
 `TurnTransport.swift`: 위 인터페이스대로 바꾸고 `extension TurnTransport { var presence: AsyncStream<Set<String>> { AsyncStream { $0.finish() } }; var connection: AsyncStream<Bool> { AsyncStream { $0.finish() } }; func refresh() async {} }`. `InMemoryTurnTransport`는 `incoming: AsyncStream<RemoteUpdate>`, `sent: [RemoteUpdate]`, `presence`는 생성 시 `{"peer"}`를 한 번 yield하는 스트림(pair가 만든 뒤 각자 `presenceContinuation.yield(["peer"])`).
 
@@ -336,8 +336,8 @@ private(set) var isConnected = true
 - `replay(remote update: RemoteUpdate)`: 이벤트 번호 `mine.count + offset`에 맞는 힌트를 `update.throws.first { $0.event == index }`로 찾아 `stage.roll(..., hint:)`에 준다. 받은 힌트는 `throwHints`에 합친다(중복 제거).
 - `startNewGame`에서 `throwHints = []`.
 
-- [ ] **Step 4: 통과 확인** — `-only-testing:YachtDiceTests`.
-- [ ] **Step 5: 커밋** — `feat(online): 던지기 힌트와 접속·연결 상태를 전송 프로토콜에 더한다`
+- [x] **Step 4: 통과 확인** — `-only-testing:YachtDiceTests`.
+- [x] **Step 5: 커밋** — `feat(online): 던지기 힌트와 접속·연결 상태를 전송 프로토콜에 더한다`
 
 ---
 
@@ -351,7 +351,7 @@ private(set) var isConnected = true
 - `MatchRow`에 `throws: [ThrowHint]`, `turnSeat: Int?` (키 `throws`, `turn_seat`).
 - `SupabaseTurnTransport(client:matchID:localUid:realtimeEnabled:)`.
 
-- [ ] **Step 1: 실패하는 테스트 (통합)**
+- [x] **Step 1: 실패하는 테스트 (통합)**
 
 ```swift
     @Test("브로드캐스트로 호스트의 기록이 1.5초 안에 게스트에게 도착한다")
@@ -384,8 +384,8 @@ private(set) var isConnected = true
 ```
 기존 테스트의 `SupabaseTurnTransport(client:matchID:)` 호출에 `localUid:`를 더한다.
 
-- [ ] **Step 2: 실패 확인** — 컴파일 에러.
-- [ ] **Step 3: 구현**
+- [x] **Step 2: 실패 확인** — 컴파일 에러.
+- [x] **Step 3: 구현**
 
 `SupabaseTurnTransport`:
 ```swift
@@ -423,8 +423,8 @@ private(set) var isConnected = true
 
 `broadcastStream`의 메시지 구조는 SDK 소스 `RealtimeChannelV2.broadcastStream`이 흘리는 `JSONObject`를 실제로 출력해 확인한 뒤 키를 맞춘다(통합 테스트에서 첫 메시지를 `print`해 본다). `record`의 uuid는 소문자 문자열이고 `log`는 객체다.
 
-- [ ] **Step 4: 통과 확인** — 단위 전체 + 통합(`SupabaseE2ETests`).
-- [ ] **Step 5: 커밋** — `feat(online): 비공개 브로드캐스트와 Presence로 상대 플레이를 받는다`
+- [x] **Step 4: 통과 확인** — 단위 전체 + 통합(`SupabaseE2ETests`).
+- [x] **Step 5: 커밋** — `feat(online): 비공개 브로드캐스트와 Presence로 상대 플레이를 받는다`
 
 ---
 
@@ -433,11 +433,11 @@ private(set) var isConnected = true
 **Files:**
 - Modify: `App/Views/PlayerStrip.swift`, `App/Views/GameScreen.swift`
 
-- [ ] **Step 1: 구현**
+- [x] **Step 1: 구현**
   - `PlayerStrip`: `.remote` 좌석의 이름 앞에 8pt 원을 두고 `session.opponentPresent`면 `theme.success`, 아니면 `theme.inkSecondary.opacity(0.5)`. 식별자 `players.presence.<i>`, 라벨 "접속 중"/"자리 비움".
   - `GameScreen`: `session.isConnected == false`가 3초 이상이면 헤더 아래에 "연결 끊김 — 재연결 중" 띠(`ScoreToast` 스타일, 식별자 `online.connection`). 3초는 `@State private var disconnectedSince: Date?`로 잰다.
-- [ ] **Step 2: 확인** — 단위 테스트 전체와 `MenuUITests` 통과, 시뮬레이터 두 대 스크립트(`$SCRATCH/duo.sh`)로 접속 점이 초록인 스크린샷.
-- [ ] **Step 3: 커밋** — `feat(ui): 상대 접속 점과 연결 끊김 띠`
+- [x] **Step 2: 확인** — 단위 테스트 전체와 `MenuUITests` 통과, 시뮬레이터 두 대 스크립트(`$SCRATCH/duo.sh`)로 접속 점이 초록인 스크린샷.
+- [x] **Step 3: 커밋** — `feat(ui): 상대 접속 점과 연결 끊김 띠`
 
 ---
 
@@ -454,25 +454,25 @@ private(set) var isConnected = true
 - Edge Function `notify-turn`: 웹훅 페이로드 `record`에서 알릴 uid(차례가 바뀌면 `turn_seat`가 0이면 `host_uid`, 1이면 `guest_uid`; 게스트 입장이면 `host_uid`)를 고르고 서비스 역할 키로 `device_tokens`를 읽어 APNs로 보낸다.
 - 앱: `PushRegistration`이 `UNUserNotificationCenter` 권한 요청, `UIApplication.registerForRemoteNotifications`, `AppDelegate`(`UIApplicationDelegateAdaptor`)에서 토큰을 받아 `device_tokens`에 upsert, 알림 탭의 `matchID`를 `AppContainer.openOnlineMatchID(_:)`로 넘긴다.
 
-- [ ] **Step 1: 서버**
+- [x] **Step 1: 서버**
   - 마이그레이션 SQL을 쓰고 MCP로 적용한다. 웹훅 비밀은 `select gen_random_uuid()`로 만들어 트리거 헤더와 함수 시크릿 `WEBHOOK_SECRET`에 같은 값을 둔다.
   - `apns.ts`: `.p8`(PKCS#8 ES256)로 JWT를 만든다 — `crypto.subtle.importKey("pkcs8", ...)`, `sign("ECDSA", { hash: "SHA-256" })`, JOSE 형식 r||s. `sendPush(token, payload, env)`는 `fetch("https://api.push.apple.com/3/device/" + token, { method: "POST", headers: { authorization: "bearer " + jwt, "apns-topic": bundleId, "apns-push-type": "alert" }, body })`. 410이면 토큰 삭제 신호를 돌려준다.
   - `apns_test.ts`: 테스트용으로 생성한 P-256 키로 JWT를 만들어 헤더 `kid`, `alg`, 페이로드 `iss`, `iat`가 맞고 서명이 `crypto.subtle.verify`로 검증되는지 확인한다. `deno test supabase/functions/notify-turn/`.
   - 배포: MCP `deploy_edge_function`(verify_jwt false). 시크릿 `APNS_KEY_ID`, `APNS_TEAM_ID=9P8KX3RJRR`, `APNS_PRIVATE_KEY`(p8 본문), `APNS_BUNDLE_ID=com.leejungheon.yachtdice.YachtDice`, `WEBHOOK_SECRET`은 대시보드 Edge Functions → Secrets에서 넣는다(사용자 작업).
-- [ ] **Step 2: 앱**
+- [x] **Step 2: 앱**
   - `App/YachtDice.entitlements`에 `aps-environment: development`를 두고 `project.yml`에 `CODE_SIGN_ENTITLEMENTS: App/YachtDice.entitlements`를 되살리되 Game Center 키는 파일에서 뺀다(개인 팀 서명 문제와 무관하게 유료 팀이므로 push는 된다).
   - `PushRegistration`(`@MainActor final class`, `UNUserNotificationCenterDelegate`): `requestAndRegister()`, `didRegister(token: Data)` → 16진 문자열로 `device_tokens` upsert, `userNotificationCenter(_:didReceive:)`에서 `userInfo["matchID"]`를 `onOpenMatch?(UUID)`로.
   - `YachtDiceApp`: `@UIApplicationDelegateAdaptor(AppDelegate.self)`; `AppDelegate`가 토큰 콜백을 `PushRegistration.shared`로 넘긴다.
   - `AppContainer.openOnlineMatchID(_ id: UUID)`: `supabase.fetchMatch(id:)` 뒤 `openSupabaseMatch`.
   - `OnlineMenu.task`에서 로그인 뒤 `PushRegistration.shared.requestAndRegister(service:)`.
-- [ ] **Step 3: 확인** — 단위 테스트 전체, `deno test` 통과, 실기기 두 대에서 한쪽이 앱을 닫아 둔 채 상대가 턴을 끝내면 알림이 오고 탭하면 그 판이 열린다(사용자 확인).
-- [ ] **Step 4: 커밋** — `feat(online): 차례가 오면 APNs 푸시로 알린다`
+- [ ] **Step 3: 확인** — 단위 테스트 전체, `deno test` 통과(완료), 실기기 두 대에서 한쪽이 앱을 닫아 둔 채 상대가 턴을 끝내면 알림이 오고 탭하면 그 판이 열린다(사용자 확인 남음).
+- [x] **Step 4: 커밋** — `feat(online): 차례가 오면 APNs 푸시로 알린다`
 
 ---
 
 ### Task 7: 정리와 문서
 
-- [ ] `OnlineMenu` 목록에서 `abandoned` 행을 "상대가 떠남"으로 표시하고 휴지통으로 지운다.
-- [ ] README 온라인 절에 브로드캐스트·힌트·푸시 구조와 시크릿 목록을 적고, 스펙 상태를 갱신한다.
-- [ ] 전체 테스트(단위·UI·통합) 통과 뒤 빌드 번호를 올려 TestFlight에 올린다.
-- [ ] 커밋 — `docs: P6 완료 반영`
+- [x] `OnlineMenu` 목록에서 `abandoned` 행을 "상대가 떠남"으로 표시하고 휴지통으로 지운다.
+- [x] README 온라인 절에 브로드캐스트·힌트·푸시 구조와 시크릿 목록을 적고, 스펙 상태를 갱신한다.
+- [x] 전체 테스트(단위·UI·통합) 통과 뒤 빌드 번호를 올려 TestFlight에 올린다.
+- [x] 커밋 — `docs: P6 완료 반영`
