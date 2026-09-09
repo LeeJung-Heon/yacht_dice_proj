@@ -4,16 +4,49 @@ import Foundation
 enum SoundSynth {
     static let sampleRate: Double = 44_100
 
-    /// 주사위가 부딪히는 "톡". 노이즈 버스트 + 낮은 톤, 지수 감쇠.
-    static func tock(intensity: Float) -> [Float] {
-        let n = Int(0.06 * sampleRate)
-        var rng = LCG(seed: 7)
-        return (0..<n).map { i in
+    /// 주사위가 부딪히는 소리. 나무 공진과 아크릴 클릭을 세기로 섞는다 — 약하게 닿으면 둔한 나무 소리,
+    /// 세게 닿으면 밝은 클릭이 더해진다. 주사위마다 피치와 노이즈가 달라 다섯 개가 따로 들린다.
+    static func tock(intensity: Float, die: Int = 2) -> [Float] {
+        let n = Int(0.08 * sampleRate)
+        var rng = LCG(seed: UInt64(67 + die * 3))
+        let detune = 1 + (Float(die) - 2) * 0.05
+        var wood = Resonator(frequency: 700 * detune, q: 8)
+        var wood2 = Resonator(frequency: 1300 * detune, q: 10)
+        var click = Resonator(frequency: 3600 * detune, q: 12)
+        var body = Resonator(frequency: 130, q: 3)
+        let brightness = 0.2 + 0.8 * intensity
+        let samples = (0..<n).map { i -> Float in
             let t = Float(i) / Float(sampleRate)
-            let env = exp(-t * 70)
-            let noise = rng.nextFloat() * 2 - 1
-            let tone = sin(2 * .pi * 180 * t)
-            return (noise * 0.6 + tone * 0.4) * env * (0.15 + 0.85 * intensity) * 0.9
+            let impulse = (rng.nextFloat() * 2 - 1) * exp(-t * 600)
+            let s = wood.run(impulse) * 0.9 + wood2.run(impulse) * 0.4
+                + click.run(impulse) * 0.7 * brightness
+                + body.run(impulse) * 1.5 * (1 - 0.5 * intensity)
+            return s * exp(-t * (30 + 20 * intensity))
+        }
+        return normalized(samples, peak: 0.22 + 0.63 * intensity)
+    }
+
+    /// 최대 진폭을 `peak`로 맞춘다.
+    static func normalized(_ samples: [Float], peak: Float) -> [Float] {
+        let max = samples.map(abs).max() ?? 0
+        return max > 0 ? samples.map { $0 / max * peak } : samples
+    }
+
+    /// 2차 공진(밴드패스) 필터. 나무·플라스틱의 울림을 만든다.
+    struct Resonator {
+        private let b0: Float, a1: Float, a2: Float
+        private var y1: Float = 0, y2: Float = 0
+        init(frequency: Float, q: Float) {
+            let w = 2 * Float.pi * frequency / Float(sampleRate)
+            let r = exp(-w / (2 * q))
+            a1 = -2 * r * cos(w)
+            a2 = r * r
+            b0 = 1 - r
+        }
+        mutating func run(_ x: Float) -> Float {
+            let y = b0 * x - a1 * y1 - a2 * y2
+            y2 = y1; y1 = y
+            return y
         }
     }
 
