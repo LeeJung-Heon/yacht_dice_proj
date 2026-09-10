@@ -19,5 +19,5 @@ enum GameID: String, CaseIterable, Sendable {
         switch self { case .yacht: "dice"; case .omok: "circle.grid.3x3"; case .cuppong: "cup.and.saucer"; case .alkkagi: "circle.circle" }
     }
     /// 아직 만들지 않은 게임은 타일이 흐리고 "준비 중"이다.
-    var isAvailable: Bool { self == .yacht || self == .omok }
+    var isAvailable: Bool { self != .alkkagi }
 }

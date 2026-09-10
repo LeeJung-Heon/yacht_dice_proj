@@ -125,4 +125,20 @@ struct AppContainerTests {
         guard case .menu(.yacht) = container.status else { Issue.record("요트 메뉴가 아니다"); return }
         #expect(container.savedRecord?.log.events.count == 1)
     }
+
+    @Test("컵퐁 로컬 2인을 시작하면 OnlineMatch<CupPong>가 만들어지고 던진 뒤 이어하기가 된다")
+    func 컵퐁_로컬() async throws {
+        let (container, dir) = try makeContainer()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        container.startCupPongLocal(names: ["갑", "을"])
+        guard case .playingCupPong(let match) = container.status else { Issue.record("컵퐁이 아니다"); return }
+        let ok = await match.play(CupPong.Shot(dx: 0, power: 350)); #expect(ok)
+        let saved = try #require(MatchStore(directory: dir).load())
+        #expect(saved.game == "cuppong")
+        container.returnToMenu()
+        guard case .menu(.cuppong) = container.status else { Issue.record("컵퐁 메뉴가 아니다"); return }
+        container.resumeSavedGame()
+        guard case .playingCupPong(let resumed) = container.status else { Issue.record("이어하기 실패"); return }
+        #expect(resumed.state.remaining(seat: 1) == 9)
+    }
 }

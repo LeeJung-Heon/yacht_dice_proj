@@ -15,11 +15,15 @@ struct YachtDiceApp: App {
                     MenuScreen(container: container)
                 case .menu(.omok):
                     OmokMenu(container: container)
+                case .menu(.cuppong):
+                    CupPongMenu(container: container)
                 case .menu:
                     // 준비 중인 게임은 허브 타일이 막는다. 그래도 들어오면 허브로 돌린다.
                     HubScreen(container: container)
                 case .playingOmok(let match):
                     OmokScreen(match: match, onReturn: { container.returnToMenu() })
+                case .playingCupPong(let match):
+                    CupPongScreen(match: match, onReturn: { container.returnToMenu() })
                 case .playing(let session):
                     if let stage = container.currentStage {
                         GameScreen(session: session, stage: stage, onReturnToMenu: { container.returnToMenu() })

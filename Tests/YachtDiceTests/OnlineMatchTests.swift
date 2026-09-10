@@ -113,3 +113,54 @@ struct OnlineMatchTests {
         #expect(saved != nil && m.localSeat == 0)
     }
 }
+
+@Suite("OnlineMatch - 컵퐁")
+@MainActor
+struct CupPongMatchTests {
+    /// 컵 열 개를 차례로 비우는 열 번의 던지기. 모두 맞으므로 좌석 0이 계속 던진다.
+    static let winningShots: [CupPong.Shot] = [
+        .init(dx: -207, power: 500), .init(dx: -69, power: 500), .init(dx: 69, power: 500), .init(dx: 207, power: 500),
+        .init(dx: -150, power: 450), .init(dx: 0, power: 450), .init(dx: 150, power: 450),
+        .init(dx: -81, power: 400), .init(dx: 81, power: 400), .init(dx: 0, power: 350),
+    ]
+
+    private func makePair() -> (OnlineMatch<CupPong>, OnlineMatch<CupPong>, InMemoryTurnTransport) {
+        let (ta, tb) = InMemoryTurnTransport.pair()
+        let a = OnlineMatch(game: CupPong.self, mode: .online(matchID: "c"),
+                            participants: [.human(name: "A"), .remote(playerID: "b", name: "B")], log: MoveLog<CupPong>(), transport: ta)
+        let b = OnlineMatch(game: CupPong.self, mode: .online(matchID: "c"),
+                            participants: [.remote(playerID: "a", name: "A"), .human(name: "B")], log: MoveLog<CupPong>(), transport: tb)
+        a.startListening(); b.startListening()
+        return (a, b, ta)
+    }
+
+    @Test("맞히면 같은 사람이 계속 던지고 상대는 수를 순서대로 재생한다")
+    func 연속_던지기() async throws {
+        let (a, b, ta) = makePair()
+        var replayed: [CupPong.Shot] = []
+        b.onRemoteMove = { shot, _ in replayed.append(shot) }
+        for shot in Self.winningShots.prefix(3) {
+            let ok = await a.play(shot); #expect(ok)
+            await b.waitForIncoming()
+        }
+        #expect(replayed == Array(Self.winningShots.prefix(3)))
+        #expect(a.isLocalTurn && !b.isLocalTurn && b.state.remaining(seat: 1) == 7)
+        #expect(ta.lastPayload?.turnSeat == 0)
+    }
+
+    @Test("빗나가면 차례가 넘어가고 turnSeat가 바뀐다")
+    func 차례_이동() async throws {
+        let (a, b, ta) = makePair()
+        let ok = await a.play(.init(dx: 0, power: 0)); #expect(ok)
+        await b.waitForIncoming()
+        #expect(!a.isLocalTurn && b.isLocalTurn && ta.lastPayload?.turnSeat == 1)
+    }
+
+    @Test("열 번 맞히면 끝나고 승자가 실린다")
+    func 완주() async throws {
+        let (a, b, ta) = makePair()
+        for shot in Self.winningShots { let ok = await a.play(shot); #expect(ok); await b.waitForIncoming() }
+        #expect(a.outcome == .win(seat: 0) && b.outcome == .win(seat: 0))
+        #expect(ta.lastPayload?.finished == true && ta.lastPayload?.winnerSeat == 0)
+    }
+}

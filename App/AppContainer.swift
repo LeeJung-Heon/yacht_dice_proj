@@ -12,6 +12,7 @@ final class AppContainer {
         case menu(GameID)
         case playing(GameSession)
         case playingOmok(OnlineMatch<Omok>)
+        case playingCupPong(OnlineMatch<CupPong>)
         case failed(String)
     }
 
@@ -60,6 +61,7 @@ final class AppContainer {
             switch self.status {
             case .playing(let session): mode = session.record.mode
             case .playingOmok(let match): mode = match.mode
+            case .playingCupPong(let match): mode = match.mode
             default: return nil
             }
             guard case .online(let id) = mode else { return nil }
@@ -91,6 +93,7 @@ final class AppContainer {
         case .menu(let game): game
         case .playing: .yacht
         case .playingOmok: .omok
+        case .playingCupPong: .cuppong
         default: nil
         }
     }
@@ -111,6 +114,7 @@ final class AppContainer {
     func openOnlineMatchID(_ id: UUID) async {
         if case .playing(let session) = status, session.record.mode == .online(matchID: id.uuidString) { return }
         if case .playingOmok(let match) = status, match.mode == .online(matchID: id.uuidString) { return }
+        if case .playingCupPong(let match) = status, match.mode == .online(matchID: id.uuidString) { return }
         await supabase.signIn()
         guard let row = try? await supabase.fetchMatch(id: id) else {
             onlineError = "매치를 읽지 못했다"
@@ -131,6 +135,7 @@ final class AppContainer {
         switch GameID(rawValue: record.game) {
         case .yacht: launch(record)
         case .omok: if !launchOmok(record, transport: nil) { discardSavedGame() }
+        case .cuppong: if !launchCupPong(record, transport: nil) { discardSavedGame() }
         default: return
         }
     }
@@ -187,6 +192,44 @@ final class AppContainer {
         return true
     }
 
+    /// 한 기기에서 번갈아 던지는 컵퐁. 저장된 판은 새 판에 밀린다.
+    func startCupPongLocal(names: [String]) {
+        try? store.clear()
+        savedRecord = nil
+        let participants: [Participant] = names.map { .human(name: $0) }
+        let record = MatchRecord(game: CupPong.id, mode: .passAndPlay(names: names), participants: participants,
+                                 moveLog: (try? MoveLog<CupPong>().encoded()) ?? Data())
+        if !launchCupPong(record, transport: nil) { discardSavedGame() }
+    }
+
+    /// 기록을 읽어 컵퐁 판을 연다. 규칙에 어긋나는 로그면 열지 않고 이유를 남긴 채 거짓이다.
+    @discardableResult
+    private func launchCupPong(_ record: MatchRecord, transport: (any TurnTransport)?) -> Bool {
+        guard let data = record.moveLog, let log = try? MoveLog<CupPong>.decoded(from: data) else {
+            onlineError = "컵퐁 기록을 읽을 수 없다"
+            return false
+        }
+        // 좌석 수가 어긋난 기록은 `OnlineMatch`의 precondition에 걸려 앱이 죽는다. 여기서 돌려보낸다.
+        guard record.participants.count == CupPong.seatCount else {
+            onlineError = "컵퐁 기록의 자리 수가 맞지 않다"
+            return false
+        }
+        let match = OnlineMatch(game: CupPong.self, mode: record.mode, participants: record.participants, log: log, transport: transport)
+        match.onFinished = { [weak self] in Task { await self?.records.reload() } }
+        if transport == nil {
+            let store = store
+            var saved = record
+            match.onLogChanged = { data in
+                if let data { saved.moveLog = data; try? store.save(saved) } else { try? store.clear() }
+            }
+        } else {
+            match.startListening()
+        }
+        stopCurrentGame()
+        status = .playingCupPong(match)
+        return true
+    }
+
     /// Supabase 행으로 게임을 연다. 게스트가 아직 없는 대기 방은 열지 않는다.
     @discardableResult
     func openSupabaseMatch(_ row: MatchRow) -> Bool {
@@ -214,6 +257,14 @@ final class AppContainer {
             return launchOmok(MatchRecord(game: Omok.id, mode: .online(matchID: row.id.uuidString),
                                           participants: participants, moveLog: row.log),
                               transport: transport)
+        case .cuppong:
+            if case .playingCupPong(let match) = status, match.mode == .online(matchID: row.id.uuidString) { return true }
+            let participants = seatParticipants(localID: localUid.uuidString, players: row.seats(localUid: localUid))
+            guard participants.contains(where: \.isHuman) else { onlineError = "이 매치에 내 자리가 없습니다"; return false }
+            onlineError = nil
+            return launchCupPong(MatchRecord(game: CupPong.id, mode: .online(matchID: row.id.uuidString),
+                                             participants: participants, moveLog: row.log),
+                                 transport: transport)
         default:
             onlineError = "아직 지원하지 않는 게임이다: \(row.game)"
             return false
@@ -286,6 +337,7 @@ final class AppContainer {
         switch status {
         case .playing(let session): session.stop()
         case .playingOmok(let match): match.stop()
+        case .playingCupPong(let match): match.stop()
         default: break
         }
     }
