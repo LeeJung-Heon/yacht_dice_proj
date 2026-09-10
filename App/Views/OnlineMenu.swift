@@ -333,6 +333,9 @@ struct OnlineMenu: View {
     private func isMyTurn(_ row: MatchRow) -> Bool {
         guard let uid = service.uid, row.guestUid != nil else { return false }
         let mySeat = row.hostUid == uid ? 0 : 1
-        return row.turnSeat == mySeat
+        // 방금 게스트가 들어온 행은 호스트가 아직 한 번도 publish하지 않아 turn_seat이 비어 있다.
+        // 그 순간의 차례는 항상 좌석 0(호스트)이다.
+        let seat = row.turnSeat ?? 0
+        return seat == mySeat
     }
 }

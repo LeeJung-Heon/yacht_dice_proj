@@ -48,8 +48,10 @@ struct MatchRowTests {
         let yacht = MatchRow(id: UUID(), code: "000001", hostUid: UUID(), guestUid: UUID(), hostName: "A", guestName: "B",
                              log: json, eventCount: 0, status: "playing", totals: nil, game: "yacht")
         #expect(yacht.yachtLog()?.playerCount == 2)
+        // omok 행에는 요트로도 멀쩡히 읽히는 JSON을 일부러 준다 — game 게이트가 없다면 이 로그도
+        // yachtLog()가 그냥 디코드해버려 아래 두 단언이 게이트 자체가 아니라 JSON 파싱 실패만 확인하게 된다.
         let omok = MatchRow(id: UUID(), code: "000002", hostUid: UUID(), guestUid: UUID(), hostName: "A", guestName: "B",
-                            log: Data("{\"moves\":[]}".utf8), eventCount: 0, status: "playing", totals: nil, game: "omok")
+                            log: json, eventCount: 0, status: "playing", totals: nil, game: "omok")
         #expect(omok.yachtLog() == nil)
         #expect(omok.record(localUid: omok.hostUid) == nil)
     }
