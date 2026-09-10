@@ -49,8 +49,7 @@ struct OmokBoardView: View {
                         let stone = state.stone(x: x, y: y)
                         guard stone != 0 else { continue }
                         let move = Omok.Move(x: x, y: y)
-                        let scale: CGFloat = animating == move ? 1.25 : 1
-                        drawStone(context, at: OmokGeometry.point(of: move, in: size), radius: c * 0.45 * scale, black: stone == 1, alpha: 1)
+                        drawStone(context, at: OmokGeometry.point(of: move, in: size), radius: c * 0.45, black: stone == 1, alpha: 1)
                     }
                 }
                 // 아직 로그에 없는 원격 수. 지금 둘 좌석의 색으로 그린다.
