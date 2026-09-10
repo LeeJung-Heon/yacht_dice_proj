@@ -21,6 +21,7 @@ struct FeedbackTests {
             ("tick", SoundSynth.tick(), 0.025),
             ("stamp", SoundSynth.stamp(), 0.12),
             ("chime", SoundSynth.chime(), 0.4),
+            ("pong", SoundSynth.pong(), 0.18),
         ]
         for (name, samples, seconds) in cases {
             #expect(samples.count == Int(seconds * SoundSynth.sampleRate), "\(name) 길이 \(samples.count)")

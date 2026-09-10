@@ -83,6 +83,20 @@ enum SoundSynth {
         }
     }
 
+    /// 공이 컵에 들어가는 "퐁". 물 튀는 노이즈에 낮은 공진.
+    static func pong() -> [Float] {
+        let n = Int(0.18 * sampleRate)
+        var rng = LCG(seed: 91)
+        var body = Resonator(frequency: 320, q: 6)
+        var splash = Resonator(frequency: 2400, q: 3)
+        let samples = (0..<n).map { i -> Float in
+            let t = Float(i) / Float(sampleRate)
+            let noise = rng.nextFloat() * 2 - 1
+            return body.run(noise * exp(-t * 300)) * 1.4 * exp(-t * 18) + splash.run(noise) * 0.25 * exp(-t * 40)
+        }
+        return normalized(samples, peak: 0.7)
+    }
+
     /// 결정적 난수. 같은 파형이 나온다.
     struct LCG {
         var state: UInt64
