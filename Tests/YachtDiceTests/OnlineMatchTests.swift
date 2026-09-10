@@ -88,6 +88,16 @@ struct OnlineMatchTests {
         #expect(savedLog.moves.count == 1)
     }
 
+    @Test("stop() 뒤에는 상대가 올린 수를 재생하지 않는다")
+    func 중지() async throws {
+        let (a, b, _, _) = makePair()
+        b.stop()
+        let played = await a.play(Omok.Move(x: 7, y: 7))
+        #expect(played)
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(b.log.moves.count == 0, "접은 판이 계속 듣고 있다")
+    }
+
     @Test("로컬 2인은 전송 없이 같은 객체에서 좌석이 번갈아 바뀐다")
     func 로컬_2인() async {
         let m = OnlineMatch(game: Omok.self, mode: .passAndPlay(names: ["갑", "을"]),

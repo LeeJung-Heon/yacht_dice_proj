@@ -164,6 +164,11 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
     }
 
     /// 세 번까지 바로 다시 보내고, 그래도 안 되면 보류해 두고 던진다. 보류분은 폴링이 이어서 보낸다.
+    ///
+    /// 다만 서버가 판단해 되돌려보낸 거절(`PostgrestError`)은 다시 보내도 결과가 같다 — 끝난 매치를
+    /// 고치려 하거나 정책에 막힌 갱신은 트리거·RLS가 언제 보내도 같은 오류를 낸다. 그런 응답은 한 번에
+    /// 접어 이유만 남기고 던지며, 보류에도 넣지 않아 폴링이 3초마다 같은 오류를 되풀이하지 않게 한다.
+    /// 망이 끊겨 응답조차 못 받은 오류만 재시도와 보류의 대상이다.
     private func send(_ update: TurnUpdate) async throws {
         lock.withLock { lastSeenCount = max(lastSeenCount, update.eventCount) }
         var lastError: Error?
@@ -173,6 +178,10 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
                 lock.withLock { pending = nil; lastSendError = nil }
                 return
             } catch {
+                if error is PostgrestError {
+                    lock.withLock { lastSendError = "\(error)" }
+                    throw error
+                }
                 lastError = error
                 try? await Task.sleep(for: .milliseconds(400 * (attempt + 1)))
             }

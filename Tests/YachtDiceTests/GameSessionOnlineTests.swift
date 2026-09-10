@@ -156,6 +156,15 @@ struct GameSessionOnlineTests {
         #expect(transport.lastPayload?.winnerSeat == 0)
     }
 
+    @Test("stop() 뒤에는 상대가 올린 갱신을 재생하지 않는다")
+    func 중지() async throws {
+        let (a, b, _, _) = try makePair()
+        b.stop()
+        await a.send(.roll)
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(b.record.log.events.count == 0, "접은 세션이 계속 듣고 있다")
+    }
+
     @Test("조작된 로그는 거부되고 상태가 바뀌지 않는다")
     func 조작_거부() async throws {
         let (ta, tb) = InMemoryTurnTransport.pair()

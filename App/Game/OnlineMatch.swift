@@ -111,14 +111,17 @@ final class OnlineMatch<G: Game> {
         }
     }
 
+    /// 스트림에 이미 쌓여 있던 값은 취소된 Task에도 그대로 배달되므로, 루프마다 취소를 먼저 본다.
     func startListening() {
         guard let transport, listenTask == nil else { return }
         listenTask = Task { [weak self] in
             for await update in transport.incoming {
+                if Task.isCancelled { return }
                 guard let self else { return }
                 let previous = replayTask
                 replayTask = Task { @MainActor in
                     await previous?.value
+                    if Task.isCancelled { return }
                     await self.replay(update)
                 }
             }
@@ -126,12 +129,25 @@ final class OnlineMatch<G: Game> {
         let remoteID = participants.compactMap { if case .remote(let id, _) = $0 { id } else { nil } }.first
         presenceTask = Task { [weak self] in
             for await present in transport.presence {
+                if Task.isCancelled { return }
                 self?.opponentPresent = remoteID.map { present.contains($0) } ?? !present.isEmpty
             }
         }
         connectionTask = Task { [weak self] in
-            for await connected in transport.connection { self?.isConnected = connected }
+            for await connected in transport.connection {
+                if Task.isCancelled { return }
+                self?.isConnected = connected
+            }
         }
+    }
+
+    /// 이 판을 접는다. 화면을 떠난 세션이 계속 수신·재생하며 살아 있지 않도록 컨테이너가 부른다.
+    /// 다시 `startListening()`을 부르면 처음처럼 새 루프가 뜬다.
+    func stop() {
+        listenTask?.cancel(); listenTask = nil
+        presenceTask?.cancel(); presenceTask = nil
+        connectionTask?.cancel(); connectionTask = nil
+        replayTask?.cancel(); replayTask = nil
     }
 
     func resync() async { await transport?.refresh() }
