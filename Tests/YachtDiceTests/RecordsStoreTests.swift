@@ -24,6 +24,14 @@ struct RecordsStoreTests {
         #expect(recent.map(\.game) == ["omok", "yacht", "omok", "omok"])
     }
 
+    @Test("플레이어 키는 Game Center id가 uid를 이기고, 없으면 uid를 소문자로 낮춘다")
+    func 플레이어_키() {
+        let uid = UUID()
+        #expect(RecordsStore.playerKey(playerID: "G:9", uid: uid) == "G:9")
+        #expect(RecordsStore.playerKey(playerID: nil, uid: uid) == uid.uuidString.lowercased())
+        #expect(RecordsStore.playerKey(playerID: nil, uid: nil) == nil)
+    }
+
     @Test("같은 승수는 리더보드에 다시 올리지 않는다")
     @MainActor
     func 중복_제출() {

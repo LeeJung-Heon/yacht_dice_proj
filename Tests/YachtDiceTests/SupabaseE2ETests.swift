@@ -292,9 +292,9 @@ struct SupabaseE2ETests {
         await #expect(throws: (any Error).self) {
             try await ta.publish(TurnPayload(log: final.log, eventCount: 9, hints: [], turnSeat: 1, winnerSeat: nil, finished: false))
         }
-        let records = await host.fetchRecords(player: hostUid.uuidString)
+        let records = await host.fetchRecords(player: try #require(RecordsStore.playerKey(playerID: nil, uid: hostUid)))
         #expect(records?.first { $0.game == "omok" }?.wins == 1)
-        let theirs = await guest.fetchRecords(player: guestUid.uuidString)
+        let theirs = await guest.fetchRecords(player: try #require(RecordsStore.playerKey(playerID: nil, uid: guestUid)))
         #expect(theirs?.first { $0.game == "omok" }?.losses == 1)
     }
 }

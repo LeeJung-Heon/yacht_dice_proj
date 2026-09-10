@@ -36,7 +36,14 @@ final class RecordsStore {
     }
 
     /// 내 식별자: Game Center면 gamePlayerID, 아니면 uid. 서버 `records.player`와 같은 값이다.
-    var me: String? { gameCenter.playerID ?? service.uid?.uuidString }
+    var me: String? { Self.playerKey(playerID: gameCenter.playerID, uid: service.uid) }
+
+    /// 서버 `records.player`·`matches.host_player`/`guest_player`와 같은 값을 만든다. Game Center에
+    /// 로그인했으면 gamePlayerID 그대로, 아니면 uid를 쓰되 서버 `uid::text` 캐스트가 소문자를 내놓으므로
+    /// `uuidString`을 그대로 쓰면 대문자라 텍스트 동등 비교가 항상 어긋난다 — 반드시 소문자로 맞춘다.
+    nonisolated static func playerKey(playerID: String?, uid: UUID?) -> String? {
+        playerID ?? uid?.uuidString.lowercased()
+    }
 
     /// 허브에 돌아올 때마다 부른다. 읽지 못한 쪽은 이미 보여주던 값을 그대로 둔다 —
     /// 잠깐 망이 끊겼다고 전적이 사라진 것처럼 보이면 안 된다.

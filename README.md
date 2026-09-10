@@ -82,7 +82,7 @@ SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
 4. Xcode 상단의 실행 대상을 그 아이폰으로 바꾸고 `YachtDice` 스킴을 Run(⌘R)하면 빌드·서명·설치가 한 번에 되며, 처음 한 번은 아이폰의 설정 → 일반 → VPN 및 기기 관리에서 내 Apple ID 개발자 앱을 신뢰해야 아이콘을 눌러 열 수 있다.
 5. 한 번 설치한 뒤에는 케이블 없이도 같은 Wi-Fi에서 Run할 수 있고(기기 창에서 "Connect via network"), 7일이 지나 앱이 열리지 않으면 Xcode에서 다시 Run하면 된다.
 
-온라인 대전을 실기기 두 대로 해 보려면 각 기기에 위 절차로 설치하고(한 Apple ID의 개인 팀으로 두 기기 모두 가능) 한쪽이 방을 만들어 코드를 알려 주면 되며, Game Center 엔타이틀먼트는 개인 팀으로 서명되지 않아 `project.yml`에서 빼 두었다.
+온라인 대전을 실기기 두 대로 해 보려면 각 기기에 위 절차로 설치하고(한 Apple ID의 개인 팀으로 두 기기 모두 가능) 한쪽이 방을 만들어 코드를 알려 주면 되며, Game Center 엔타이틀먼트(`com.apple.developer.game-center`)는 `project.yml`에 이미 걸려 있고 앱 ID의 Game Center 기능과 App Store Connect의 리더보드 `wins.yacht`·`wins.omok`·`wins.cuppong`·`wins.alkkagi`도 만들어 둔 상태라, 유료 팀으로 서명하면 로그인과 승수 제출이 그대로 된다.
 
 ## TestFlight로 배포하기
 
