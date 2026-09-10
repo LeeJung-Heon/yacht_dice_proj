@@ -297,4 +297,31 @@ struct SupabaseE2ETests {
         let theirs = await guest.fetchRecords(player: try #require(RecordsStore.playerKey(playerID: nil, uid: guestUid)))
         #expect(theirs?.first { $0.game == "omok" }?.losses == 1)
     }
+
+    @Test("연결된 플레이어로만 방을 만들고 들어갈 수 있다")
+    func 연결된_플레이어() async throws {
+        let host = SupabaseService(client: makeClient())
+        let guest = SupabaseService(client: makeClient())
+        await host.signIn(); await guest.signIn()
+        let hostPlayer = "T:" + UUID().uuidString.lowercased()
+        let guestPlayer = "T:" + UUID().uuidString.lowercased()
+        // 연결하지 않은 플레이어 문자열로는 방을 만들 수 없다
+        await #expect(throws: (any Error).self) {
+            _ = try await host.createRoom(name: "A", game: "omok", player: hostPlayer)
+        }
+        await host.upsertProfile(player: hostPlayer, name: "A")
+        let room = try await host.createRoom(name: "A", game: "omok", player: hostPlayer)
+        #expect(room.hostPlayer == hostPlayer)
+        // 게스트도 연결하지 않으면 거부되고, 연결하면 들어간다
+        await #expect(throws: (any Error).self) {
+            _ = try await guest.joinRoom(code: room.code, name: "B", player: guestPlayer)
+        }
+        await guest.upsertProfile(player: guestPlayer, name: "B")
+        let joined = try await guest.joinRoom(code: room.code, name: "B", player: guestPlayer)
+        #expect(joined.guestPlayer == guestPlayer && joined.status == "playing")
+        // 호스트는 연결된 플레이어 정책으로도 행을 읽는다
+        let refreshed = try await host.fetchMatch(id: room.id)
+        #expect(refreshed.guestPlayer == guestPlayer)
+        try await host.deleteMatch(id: room.id)
+    }
 }
