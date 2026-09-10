@@ -38,8 +38,11 @@ struct MatchStore: Sendable {
               let data = try? Data(contentsOf: fileURL) else { return nil }
 
         if let record = try? JSONDecoder().decode(MatchRecord.self, from: data) {
-            guard record.formatVersion == MatchRecord.formatVersion,
-                  record.participants.count == record.log.playerCount,
+            guard (2...MatchRecord.formatVersion).contains(record.formatVersion) else { return nil }
+            if !record.isYacht {
+                return record.moveLog == nil ? nil : record
+            }
+            guard record.participants.count == record.log.playerCount,
                   // 로그는 신뢰 경계다. 디코더가 아니라 canApply로 끝까지 재생해 본다.
                   let encoded = try? record.log.encoded(),
                   let log = try? MatchLog.decoded(from: encoded),

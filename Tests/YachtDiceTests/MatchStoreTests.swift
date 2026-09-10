@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import YachtCore
 import YachtBot
+import GameCore
 @testable import YachtDice
 
 @Suite("진행 저장")
@@ -115,5 +116,30 @@ struct MatchStoreTests {
         let record = MatchRecord(mode: .passAndPlay(names: ["철수", "영희", "민수"]))
         #expect(record.participants == [.human(name: "철수"), .human(name: "영희"), .human(name: "민수")])
         #expect(record.log.playerCount == 3)
+    }
+
+    @Test("오목 기록은 moveLog로 저장되고 그대로 돌아온다")
+    func 오목_왕복() throws {
+        let (store, dir) = try makeTempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var log = MoveLog<Omok>()
+        _ = log.append(Omok.Move(x: 7, y: 7))
+        let record = MatchRecord(game: Omok.id, mode: .passAndPlay(names: ["갑", "을"]),
+                                 participants: [.human(name: "갑"), .human(name: "을")], moveLog: try log.encoded())
+        try store.save(record)
+        let loaded = try #require(store.load())
+        #expect(loaded.game == "omok" && loaded.moveLog == record.moveLog && loaded.log.events.isEmpty)
+    }
+
+    @Test("v2 파일은 game이 yacht로 읽힌다")
+    func v2_호환() throws {
+        let (store, dir) = try makeTempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let v2 = """
+        {"formatVersion":2,"mode":{"solo":{}},"participants":[{"human":{"name":"나"}}],"log":{"formatVersion":1,"playerCount":1,"events":[]}}
+        """
+        try Data(v2.utf8).write(to: dir.appending(path: "match.json"))
+        let loaded = try #require(store.load())
+        #expect(loaded.game == "yacht" && loaded.mode == .solo)
     }
 }
