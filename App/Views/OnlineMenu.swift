@@ -333,6 +333,6 @@ struct OnlineMenu: View {
     private func isMyTurn(_ row: MatchRow) -> Bool {
         guard let uid = service.uid, row.guestUid != nil else { return false }
         let mySeat = row.hostUid == uid ? 0 : 1
-        return row.log.state.currentPlayer == mySeat
+        return row.turnSeat == mySeat
     }
 }

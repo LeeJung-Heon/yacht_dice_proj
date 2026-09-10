@@ -51,16 +51,19 @@ final class SupabaseService {
     }
 
     /// 방을 만든다. 호스트는 대기 방을 하나만 가지므로 먼저 이전 대기 방을 지우고, 코드가 겹치면 다시 뽑는다.
-    func createRoom(name: String) async throws -> MatchRow {
+    /// `log`는 게임별 빈 로그다 — 요트는 `MatchLog`, 그 외는 게임이 정하는 모양의 JSON.
+    func createRoom(name: String, game: String = "yacht", player: String? = nil) async throws -> MatchRow {
         guard let uid else { throw ServiceError.notSignedIn }
         try await client.from("matches").delete()
             .eq("host_uid", value: uid.uuidString).eq("status", value: "waiting").execute()
+        let log: JSONValue = game == "yacht"
+            ? try JSONDecoder().decode(JSONValue.self, from: MatchLog(playerCount: 2).encoded())
+            : .object(["moves": .array([])])
         var generator = SystemRandomNumberGenerator()
         var lastError: Error = ServiceError.codeCollision
         for _ in 0..<5 {
             let code = MatchRow.makeCode(using: &generator)
-            let insert = NewMatch(code: code, hostUid: uid, hostName: name,
-                                  log: MatchLog(playerCount: 2))
+            let insert = NewMatch(code: code, hostUid: uid, hostName: name, log: log, game: game, hostPlayer: player)
             do {
                 let row: MatchRow = try await client.from("matches").insert(insert).select().single().execute().value
                 return row
@@ -71,10 +74,12 @@ final class SupabaseService {
         throw lastError
     }
 
-    func joinRoom(code: String, name: String) async throws -> MatchRow {
+    func joinRoom(code: String, name: String, player: String? = nil) async throws -> MatchRow {
         guard uid != nil else { throw ServiceError.notSignedIn }
+        var params: [String: String] = ["p_code": code, "p_name": name]
+        if let player { params["p_player"] = player }
         let row: MatchRow = try await client
-            .rpc("join_match", params: ["p_code": code, "p_name": name])
+            .rpc("join_match", params: params)
             .single()
             .execute().value
         return row
@@ -113,10 +118,13 @@ final class SupabaseService {
         let code: String
         let hostUid: UUID
         let hostName: String
-        let log: MatchLog
+        let log: JSONValue
+        let game: String
+        let hostPlayer: String?
         enum CodingKeys: String, CodingKey {
-            case code, log
+            case code, log, game
             case hostUid = "host_uid", hostName = "host_name"
+            case hostPlayer = "host_player"
         }
     }
 }

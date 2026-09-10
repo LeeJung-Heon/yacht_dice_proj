@@ -103,7 +103,7 @@ struct SupabaseE2ETests {
 
         // 서버 행도 같은 로그를 갖는다
         let final = try await host.fetchMatch(id: room.id)
-        #expect(final.log == hostSession.record.log)
+        #expect(try #require(final.yachtLog()) == hostSession.record.log)
         #expect(final.eventCount == hostSession.record.log.events.count)
     }
 

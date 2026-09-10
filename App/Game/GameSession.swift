@@ -251,7 +251,7 @@ final class GameSession {
     private func publishProgressIfOnline() async {
         guard let transport else { return }
         do {
-            try await transport.publishProgress(log: record.log, hints: throwHints)
+            try await transport.publish(payload(finished: false, turnSeat: visibleState.currentPlayer))
             lastTransportError = nil
         } catch {
             lastTransportError = "서버에 보내지 못해 다시 시도하는 중이다"
@@ -263,15 +263,25 @@ final class GameSession {
         guard let transport else { return }
         do {
             if visibleState.phase == .finished {
-                try await transport.endMatch(log: record.log, hints: throwHints,
-                                             totals: visibleState.scorecards.map(\.total))
+                try await transport.publish(payload(finished: true, turnSeat: nil))
             } else if case .remote = currentParticipant {
-                try await transport.endTurn(log: record.log, hints: throwHints, nextSeat: visibleState.currentPlayer)
+                try await transport.publish(payload(finished: false, turnSeat: visibleState.currentPlayer))
             }
             lastTransportError = nil
         } catch {
             lastTransportError = "서버에 보내지 못해 다시 시도하는 중이다"
         }
+    }
+
+    /// 요트 로그를 전송용 JSON으로 싼다. 총점 동점이면 승자 없음(무승부).
+    private func payload(finished: Bool, turnSeat: Int?) throws -> TurnPayload {
+        var winner: Int? = nil
+        if finished {
+            let totals = visibleState.scorecards.map(\.total)
+            if let best = totals.max(), totals.filter({ $0 == best }).count == 1 { winner = totals.firstIndex(of: best) }
+        }
+        return TurnPayload(log: try record.log.encoded(), eventCount: record.log.events.count, hints: throwHints,
+                           turnSeat: turnSeat, winnerSeat: winner, finished: finished)
     }
 
     /// 상대 플레이를 재생할 때 이벤트 사이에 두는 뜸. 실제 상대의 손놀림보다 빨리 지나가면 뭘 했는지 읽을 수 없다.
@@ -287,7 +297,10 @@ final class GameSession {
     /// 상대가 보낸 로그에서 내가 모르는 이벤트만 검증하며 재생한다.
     /// 굴림은 3D로 보여주고, 고정·기록은 적용한 뒤 잠깐 멈춰 눈으로 따라올 시간을 준다.
     private func replay(remote update: RemoteUpdate) async {
-        let log = update.log
+        guard let log = try? MatchLog.decoded(from: update.log) else {
+            lastTransportError = "상대의 기록을 읽을 수 없다"
+            return
+        }
         // 상대의 힌트를 합친다 (같은 이벤트 번호는 하나만)
         for hint in update.hints where !throwHints.contains(where: { $0.event == hint.event }) {
             throwHints.append(hint)

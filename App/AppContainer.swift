@@ -1,5 +1,4 @@
 import Foundation
-import GameKit
 import Observation
 import YachtCore
 
@@ -41,7 +40,6 @@ final class AppContainer {
             status = .failed("주사위 데이터를 읽지 못했습니다: \(error)")
         }
         savedRecord = store.load()
-        gameCenter.onMatchOpened = { [weak self] match in self?.startOnlineMatch(match) }
         PushRegistration.shared.currentMatchID = { [weak self] in
             guard let self, case .playing(let session) = self.status,
                   case .online(let id) = session.record.mode else { return nil }
@@ -79,14 +77,6 @@ final class AppContainer {
         status = .menu
     }
 
-    /// Game Center 매치로 게임을 시작하거나 이어간다. 진행 상태의 원본은 매치 데이터라 로컬에 저장하지 않는다.
-    func startOnlineMatch(_ match: GKTurnBasedMatch) {
-        let players = match.participants.map { SeatPlayer(id: $0.player?.gamePlayerID, name: $0.player?.displayName) }
-        _ = openOnlineMatch(matchID: match.matchID, localID: gameCenter.localPlayerID, players: players,
-                            matchData: match.matchData,
-                            transport: GameCenterTurnTransport(match: match, service: gameCenter))
-    }
-
     /// Supabase 행으로 게임을 연다. 게스트가 아직 없는 대기 방은 열지 않는다.
     @discardableResult
     func openSupabaseMatch(_ row: MatchRow) -> Bool {
@@ -98,7 +88,7 @@ final class AppContainer {
             onlineError = "상대가 아직 들어오지 않았다"
             return false
         }
-        let data = try? row.log.encoded()
+        let data = row.log
         return openOnlineMatch(matchID: row.id.uuidString, localID: uid.uuidString,
                                players: row.seats(localUid: uid), matchData: data,
                                transport: SupabaseTurnTransport(client: supabase.client, matchID: row.id))

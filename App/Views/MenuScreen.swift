@@ -60,7 +60,7 @@ struct MenuScreen: View {
                             showingLocalSetup = true
                         }
 
-                        ModeCard(icon: "network", title: "온라인 대전", subtitle: "Game Center로 친구·랜덤 매칭",
+                        ModeCard(icon: "network", title: "온라인 대전", subtitle: "방 코드로 친구와 겨룬다",
                                  identifier: "menu.online") {
                             showingOnline = true
                         }

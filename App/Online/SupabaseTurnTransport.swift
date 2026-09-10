@@ -1,6 +1,5 @@
 import Foundation
 import Supabase
-import YachtCore
 
 /// `matches` 행 하나를 `TurnTransport`로 감싼다.
 ///
@@ -151,28 +150,17 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
 
     private func deliver(_ row: MatchRow) {
         let isNew: Bool = lock.withLock {
-            guard row.log.events.count > lastSeenCount else { return false }
-            lastSeenCount = row.log.events.count
+            guard row.eventCount > lastSeenCount else { return false }
+            lastSeenCount = row.eventCount
             return true
         }
-        if isNew { continuation.yield(RemoteUpdate(log: row.log, hints: row.hints)) }
+        if isNew { continuation.yield(RemoteUpdate(log: row.log, eventCount: row.eventCount, hints: row.hints)) }
     }
 
-    /// 턴 도중에도 같은 행을 갱신한다. 상대는 브로드캐스트나 폴링으로 굴림 하나하나를 받아 재생한다.
-    func publishProgress(log: MatchLog, hints: [ThrowHint]) async throws {
-        try await send(TurnUpdate(log: log, hints: hints, eventCount: log.events.count,
-                                  status: "playing", totals: nil, turnSeat: log.state.currentPlayer))
-    }
-
-    /// `turnSeat`가 바뀌면 서버 웹훅이 다음 좌석에게 푸시를 보낸다.
-    func endTurn(log: MatchLog, hints: [ThrowHint], nextSeat: Int) async throws {
-        try await send(TurnUpdate(log: log, hints: hints, eventCount: log.events.count,
-                                  status: "playing", totals: nil, turnSeat: nextSeat))
-    }
-
-    func endMatch(log: MatchLog, hints: [ThrowHint], totals: [Int]) async throws {
-        try await send(TurnUpdate(log: log, hints: hints, eventCount: log.events.count,
-                                  status: "finished", totals: totals, turnSeat: nil))
+    func publish(_ payload: TurnPayload) async throws {
+        try await send(TurnUpdate(log: payload.log, hints: payload.hints, eventCount: payload.eventCount,
+                                  status: payload.finished ? "finished" : "playing",
+                                  turnSeat: payload.turnSeat, winnerSeat: payload.winnerSeat))
     }
 
     /// 세 번까지 바로 다시 보내고, 그래도 안 되면 보류해 두고 던진다. 보류분은 폴링이 이어서 보낸다.
@@ -205,26 +193,27 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
     }
 
     private struct TurnUpdate: Encodable {
-        let log: MatchLog
+        let log: Data
         let hints: [ThrowHint]
         let eventCount: Int
         let status: String
-        let totals: [Int]?
         let turnSeat: Int?
+        let winnerSeat: Int?
         enum CodingKeys: String, CodingKey {
-            case log, status, totals
+            case log, status
             case hints = "throws"
             case eventCount = "event_count"
             case turnSeat = "turn_seat"
+            case winnerSeat = "winner_seat"
         }
         func encode(to encoder: any Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encode(log, forKey: .log)
+            try container.encode(JSONDecoder().decode(JSONValue.self, from: log), forKey: .log)
             try container.encode(hints, forKey: .hints)
             try container.encode(eventCount, forKey: .eventCount)
             try container.encode(status, forKey: .status)
-            try container.encode(totals, forKey: .totals)
             try container.encode(turnSeat, forKey: .turnSeat)   // nil이면 null로 지운다
+            try container.encode(winnerSeat, forKey: .winnerSeat)
         }
     }
 }

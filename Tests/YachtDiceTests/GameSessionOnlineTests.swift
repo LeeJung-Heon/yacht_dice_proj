@@ -116,7 +116,9 @@ struct GameSessionOnlineTests {
         b.reduceMotion = true; b.startListening()
         var forged = MatchLog(playerCount: 2)
         forged.append(.committed(.yacht, 50))   // 굴리지도 않고 기록
-        try await ta.endTurn(log: forged, hints: [], nextSeat: 1)
+        let encoded = try forged.encoded()
+        try await ta.publish(TurnPayload(log: encoded, eventCount: forged.events.count, hints: [],
+                                         turnSeat: 1, winnerSeat: nil, finished: false))
         await b.waitForIncoming()
         #expect(b.visibleState.scorecards[0].entry(.yacht) == nil)
         #expect(b.lastTransportError != nil)
