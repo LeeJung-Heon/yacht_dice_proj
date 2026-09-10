@@ -3,6 +3,7 @@ import Foundation
 import Supabase
 import YachtCore
 import DiceTrajectory
+import GameCore
 @testable import YachtDice
 
 /// 실제 Supabase 프로젝트를 상대로 방 만들기 → 들어가기 → 턴 전송 → Realtime 수신을 검증한다.
@@ -253,5 +254,47 @@ struct SupabaseE2ETests {
         await #expect(throws: (any Error).self) {
             _ = try await guest.joinRoom(code: "000000", name: "B")
         }
+    }
+
+    @Test("오목 방을 만들고 들어가 다섯 수로 끝내면 winner_seat와 records가 남는다")
+    func 오목_한_판() async throws {
+        let host = SupabaseService(client: makeClient())
+        let guest = SupabaseService(client: makeClient())
+        await host.signIn(); await guest.signIn()
+        let hostUid = try #require(host.uid), guestUid = try #require(guest.uid)
+        let room = try await host.createRoom(name: "A", game: "omok", player: nil)
+        #expect(room.game == "omok")
+        let joined = try await guest.joinRoom(code: room.code, name: "B", player: nil)
+        let refreshed = try await host.fetchMatch(id: room.id)
+        let ta = SupabaseTurnTransport(client: host.client, matchID: room.id)
+        let tb = SupabaseTurnTransport(client: guest.client, matchID: room.id)
+        let a = OnlineMatch(game: Omok.self, mode: .online(matchID: room.id.uuidString),
+                            participants: seatParticipants(localID: hostUid.uuidString, players: refreshed.seats(localUid: hostUid)),
+                            log: MoveLog<Omok>(), transport: ta)
+        let b = OnlineMatch(game: Omok.self, mode: .online(matchID: room.id.uuidString),
+                            participants: seatParticipants(localID: guestUid.uuidString, players: joined.seats(localUid: guestUid)),
+                            log: MoveLog<Omok>(), transport: tb)
+        a.startListening(); b.startListening()
+        let deadline = ContinuousClock.now + .seconds(8)
+        while !(ta.isSubscribed && tb.isSubscribed), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(100)) }
+        let moves: [(OnlineMatch<Omok>, Int, Int)] = [(a,0,0),(b,0,1),(a,1,0),(b,1,1),(a,2,0),(b,2,1),(a,3,0),(b,3,1),(a,4,0)]
+        for (m, x, y) in moves {
+            #expect(await m.play(Omok.Move(x: x, y: y)), "\(x),\(y) 실패: \(m.lastTransportError ?? "")")
+            let other = m === a ? b : a
+            let d = ContinuousClock.now + .seconds(10)
+            while other.log.moves.count != m.log.moves.count, ContinuousClock.now < d { try await Task.sleep(for: .milliseconds(50)) }
+            #expect(other.log.moves.count == m.log.moves.count, "상대에게 수가 가지 않았다")
+        }
+        #expect(a.outcome == .win(seat: 0) && b.outcome == .win(seat: 0))
+        let final = try await host.fetchMatch(id: room.id)
+        #expect(final.status == "finished" && final.winnerSeat == 0)
+        // 끝난 판은 더 못 바꾼다
+        await #expect(throws: (any Error).self) {
+            try await ta.publish(TurnPayload(log: final.log, eventCount: 9, hints: [], turnSeat: 1, winnerSeat: nil, finished: false))
+        }
+        let records = await host.fetchRecords(player: hostUid.uuidString)
+        #expect(records?.first { $0.game == "omok" }?.wins == 1)
+        let theirs = await guest.fetchRecords(player: guestUid.uuidString)
+        #expect(theirs?.first { $0.game == "omok" }?.losses == 1)
     }
 }

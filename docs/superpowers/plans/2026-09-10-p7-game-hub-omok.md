@@ -33,7 +33,7 @@
 **Interfaces:**
 - Produces: `public protocol Game { associatedtype State; associatedtype Move; static var id, displayName: String; static var seatCount: Int; static func initial() -> State; static func canApply(_:to:) -> Bool; static func apply(_:to:) -> State; static func currentSeat(_:) -> Int?; static func outcome(_:) -> Outcome? }`, `public enum Outcome { case win(seat: Int), draw }`, `public struct MoveLog<G: Game> { var moves: [G.Move]; var state: G.State; mutating func append(_:) -> Bool; func encoded() throws -> Data; static func decoded(from:) throws -> Self }`, `public enum Omok: Game` with `State { cells: [UInt8]; nextSeat: Int?; lastMove: Move?; outcome: Outcome? }`, `Move { x, y }`, `static let size = 15`.
 
-- [ ] **Step 1: 패키지 뼈대와 실패하는 테스트**
+- [x] **Step 1: 패키지 뼈대와 실패하는 테스트**
 
 `Packages/GameCore/Package.swift`:
 ```swift
@@ -160,9 +160,9 @@ struct MoveLogTests {
 }
 ```
 
-- [ ] **Step 2: 실패 확인** — `swift test --package-path Packages/GameCore 2>&1 | tail -3` → 컴파일 오류(`Omok` 없음).
+- [x] **Step 2: 실패 확인** — `swift test --package-path Packages/GameCore 2>&1 | tail -3` → 컴파일 오류(`Omok` 없음).
 
-- [ ] **Step 3: 구현**
+- [x] **Step 3: 구현**
 
 `Game.swift`:
 ```swift
@@ -317,9 +317,9 @@ public enum Omok: Game {
 
 `project.yml` — `packages:`에 `GameCore: { path: Packages/GameCore }`를 더하고 `YachtDice` 타깃 `dependencies:`에 `- package: GameCore`를 더한다. `DEVELOPMENT_TEAM=9P8KX3RJRR xcodegen generate`.
 
-- [ ] **Step 4: 통과 확인** — `swift test --package-path Packages/GameCore 2>&1 | tail -3` → 7개 통과. 무승부 테스트의 색 지도가 5목을 만들면 `color` 함수를 `((x / 2 + y) % 2)`로 바꿔 다시 돈다(둘 중 하나는 5목이 안 생긴다 — 확인 뒤 남기는 쪽을 주석에 적는다).
+- [x] **Step 4: 통과 확인** — `swift test --package-path Packages/GameCore 2>&1 | tail -3` → 7개 통과. 무승부 테스트의 색 지도가 5목을 만들면 `color` 함수를 `((x / 2 + y) % 2)`로 바꿔 다시 돈다(둘 중 하나는 5목이 안 생긴다 — 확인 뒤 남기는 쪽을 주석에 적는다).
 
-- [ ] **Step 5: 커밋** — `git add Packages/GameCore project.yml && git commit -m "feat(core): 게임 프로토콜과 MoveLog, 오목 규칙을 GameCore 패키지로 둔다"`
+- [x] **Step 5: 커밋** — `git add Packages/GameCore project.yml && git commit -m "feat(core): 게임 프로토콜과 MoveLog, 오목 규칙을 GameCore 패키지로 둔다"`
 
 ---
 
@@ -331,7 +331,7 @@ public enum Omok: Game {
 **Interfaces:**
 - Produces: `matches.game text`, `matches.host_player text`, `matches.guest_player text`, `matches.winner_seat smallint`; RPC `join_match(p_code text, p_name text, p_player text default null)`; 테이블 `profiles(player, uid, name, updated_at)`; 뷰 `records(player, game, wins, losses, draws)`.
 
-- [ ] **Step 1: 마이그레이션 작성**
+- [x] **Step 1: 마이그레이션 작성**
 
 ```sql
 -- P7: 여러 게임과 Game Center 신원, 승자 기록
@@ -435,14 +435,14 @@ from seats group by player, game;
 grant select on public.records to authenticated;
 ```
 
-- [ ] **Step 2: 적용** — MCP `apply_migration(name: "games", query: 위 SQL)`. 이어서 MCP `execute_sql`로 확인:
+- [x] **Step 2: 적용** — MCP `apply_migration(name: "games", query: 위 SQL)`. 이어서 MCP `execute_sql`로 확인:
 ```sql
 select column_name from information_schema.columns where table_name = 'matches' and column_name in ('game','host_player','guest_player','winner_seat');
 select proname, pg_get_function_arguments(oid) from pg_proc where proname = 'join_match';
 ```
 → 열 넷, `join_match(p_code text, p_name text, p_player text DEFAULT NULL::text)`.
 
-- [ ] **Step 3: 가드 확인** — `execute_sql`:
+- [x] **Step 3: 가드 확인** — `execute_sql`:
 ```sql
 do $$ declare m uuid; begin
   select id into m from public.matches where status = 'finished' limit 1;
@@ -455,7 +455,7 @@ select count(*) from public.records;
 ```
 → 오류 없이 끝나고 `records` 카운트가 나온다. 마지막으로 MCP `get_advisors(type: security)`에서 `records`·`profiles` 관련 새 경고가 없는지 본다(익명 정책 경고는 기존과 같다).
 
-- [ ] **Step 4: 커밋** — `git add supabase/migrations/20260910_games.sql && git commit -m "feat(server): 게임·플레이어·승자 열과 profiles, records 뷰를 더한다"`
+- [x] **Step 4: 커밋** — `git add supabase/migrations/20260910_games.sql && git commit -m "feat(server): 게임·플레이어·승자 열과 profiles, records 뷰를 더한다"`
 
 ---
 
@@ -481,7 +481,7 @@ protocol TurnTransport: Sendable {
 ```
   `MatchRow`: `log: Data`(원문 JSON), `game: String`, `hostPlayer: String?`, `guestPlayer: String?`, `winnerSeat: Int?`, `func yachtLog() -> MatchLog?`, `func record(localUid:)`는 `game == "yacht"`일 때만 요트 기록을 준다. `SupabaseService.createRoom(name:game:player:)`, `joinRoom(code:name:player:)`. `InMemoryTurnTransport.sent: [TurnPayload]`, `sentLogs: [Data]`, `finishedTotals` 삭제, `lastPayload`.
 
-- [ ] **Step 1: 실패하는 테스트로 새 모양을 고정한다**
+- [x] **Step 1: 실패하는 테스트로 새 모양을 고정한다**
 
 `Tests/YachtDiceTests/TurnTransportTests.swift`를 다음으로 바꾼다:
 ```swift
@@ -560,9 +560,9 @@ struct TurnTransportTests {
     }
 ```
 
-- [ ] **Step 2: 실패 확인** — 단위 테스트 빌드가 `TurnPayload` 없음으로 실패한다.
+- [x] **Step 2: 실패 확인** — 단위 테스트 빌드가 `TurnPayload` 없음으로 실패한다.
 
-- [ ] **Step 3: 전송 프로토콜과 메모리 전송**
+- [x] **Step 3: 전송 프로토콜과 메모리 전송**
 
 `App/Online/TurnTransport.swift` 전체:
 ```swift
@@ -646,7 +646,7 @@ final class InMemoryTurnTransport: TurnTransport, @unchecked Sendable {
 }
 ```
 
-- [ ] **Step 4: MatchRow와 SupabaseService**
+- [x] **Step 4: MatchRow와 SupabaseService**
 
 `App/Online/MatchRow.swift`에서 `var log: MatchLog`를 `var log: Data`로 바꾸고 `game: String = "yacht"`, `hostPlayer: String?`, `guestPlayer: String?`, `winnerSeat: Int?`를 더한다. `CodingKeys`에 `game`, `hostPlayer = "host_player"`, `guestPlayer = "guest_player"`, `winnerSeat = "winner_seat"`를 더한다. 멤버 초기화자의 인자 순서는 `id, code, hostUid, guestUid, hostName, guestName, log: Data, eventCount, status, totals, hints = [], turnSeat = nil, game = "yacht", hostPlayer = nil, guestPlayer = nil, winnerSeat = nil`이다(뒤 Task의 테스트가 이 순서로 부른다). `init(from:)`에서 `log`는 원문을 남기기 위해 다음처럼 읽는다:
 ```swift
@@ -692,7 +692,7 @@ enum JSONValue: Codable, Equatable, Sendable {
 - `joinRoom(code: String, name: String, player: String? = nil)`: `params`를 `["p_code": code, "p_name": name, "p_player": player ?? ""]`로 보내되 `player`가 nil이면 `p_player`를 빼고 보낸다(`var params: [String: String] = [...]; if let player { params["p_player"] = player }`).
 - `OnlineMenu.isMyTurn(_:)`: `row.log.state.currentPlayer == mySeat` 대신 `row.turnSeat == mySeat`를 쓴다(P6부터 서버가 `turn_seat`를 갖는다. 대기 방은 nil이라 거짓).
 
-- [ ] **Step 5: SupabaseTurnTransport**
+- [x] **Step 5: SupabaseTurnTransport**
 
 `App/Online/SupabaseTurnTransport.swift`에서 `import YachtCore`를 지우고:
 - `deliver(_ row: MatchRow)`: `row.log.events.count` 대신 `row.eventCount`로 새 것을 가리고 `RemoteUpdate(log: row.log, eventCount: row.eventCount, hints: row.hints)`를 흘린다.
@@ -706,7 +706,7 @@ enum JSONValue: Codable, Equatable, Sendable {
 ```
 - `TurnUpdate`에서 `log: MatchLog`를 `log: Data`로, `totals`를 `winnerSeat: Int?`(`winner_seat`)로 바꾸고 `encode(to:)`에서 `try container.encode(JSONDecoder().decode(JSONValue.self, from: log), forKey: .log)`로 원문을 jsonb로 넣는다. `totals`는 더 이상 쓰지 않는다(열은 남겨 둔다).
 
-- [ ] **Step 6: GameSession 어댑터**
+- [x] **Step 6: GameSession 어댑터**
 
 `App/Game/GameSession.swift`:
 - `publishProgressIfOnline`: `try await transport.publish(payload(finished: false, turnSeat: visibleState.currentPlayer))`.
@@ -727,20 +727,20 @@ enum JSONValue: Codable, Equatable, Sendable {
 - `replay(remote update: RemoteUpdate)` 첫 줄을 `guard let log = try? MatchLog.decoded(from: update.log) else { lastTransportError = "상대의 기록을 읽을 수 없다"; return }`로 바꾼다.
 - `waitForIncoming`은 그대로다.
 
-- [ ] **Step 7: Game Center 턴제 코드 삭제와 AppContainer**
+- [x] **Step 7: Game Center 턴제 코드 삭제와 AppContainer**
 
 `git rm App/Online/GameCenterTurnTransport.swift App/Online/MatchmakerView.swift`. `App/Online/GameCenterService.swift`에서 `activeMatches`, `onMatchOpened`, `streams`, `stream(for:)`, `reloadMatches`, `GKLocalPlayerListener` 채택과 두 `player(_:...)` 메서드, `deliver`, `import YachtCore`를 지우고 인증만 남긴다(Task 7이 다시 채운다). `AppContainer`에서 `startOnlineMatch(_ match: GKTurnBasedMatch)`와 `gameCenter.onMatchOpened = ...` 줄, `import GameKit`을 지우고, `openSupabaseMatch`는 `let data = row.log`로 바꾼다. `MenuScreen`의 온라인 카드 부제 "Game Center로 친구·랜덤 매칭"을 "방 코드로 친구와 겨룬다"로 바꾼다.
 
-- [ ] **Step 8: 테스트 갱신**
+- [x] **Step 8: 테스트 갱신**
 
 - `GameSessionOnlineTests.swift`: `조작_거부`에서 `try await ta.endTurn(log: forged, hints: [], nextSeat: 1)`을 `try await ta.publish(TurnPayload(log: try forged.encoded(), eventCount: forged.events.count, hints: [], turnSeat: 1, winnerSeat: nil, finished: false))`로. `#expect(ta.sentLogs ...)`류가 있으면 `ta.sent.map { try? MatchLog.decoded(from: $0.log) }`로 비교한다. `완주` 테스트가 `finishedTotals`를 보면 `ta.lastPayload?.finished == true && ta.lastPayload?.winnerSeat != nil || 총점 동점`으로 바꾼다.
 - `OnlineMatchOpenTests.swift`: `theirs.endTurn(log: next, hints: [], nextSeat: 0)`를 `theirs.publish(TurnPayload(log: try next.encoded(), eventCount: next.events.count, hints: [], turnSeat: 0, winnerSeat: nil, finished: false))`로.
 - `SupabaseE2ETests.swift`: `refreshed.record(localUid:)`는 그대로 동작한다(요트 행). 마지막 `final.log == hostSession.record.log`는 `try #require(final.yachtLog()) == hostSession.record.log`로. 통합 테스트는 이 Task에서 돌리지 않고 Task 8에서 한 번에 돈다.
 - `AppSmokeTests`·`AppContainerTests`에 `MatchmakerView`나 `GKTurnBasedMatch` 참조가 있으면 지운다.
 
-- [ ] **Step 9: 단위 테스트 전체 통과** — Global Constraints의 명령. 회귀가 없어야 한다(요트 온라인 5개, 열기 6개 포함).
+- [x] **Step 9: 단위 테스트 전체 통과** — Global Constraints의 명령. 회귀가 없어야 한다(요트 온라인 5개, 열기 6개 포함).
 
-- [ ] **Step 10: 커밋** — `git add -A && git commit -m "refactor(online): 전송이 JSON 로그만 나르게 하고 Game Center 턴제 코드를 지운다"`
+- [x] **Step 10: 커밋** — `git add -A && git commit -m "refactor(online): 전송이 JSON 로그만 나르게 하고 Game Center 턴제 코드를 지운다"`
 
 ---
 
@@ -774,7 +774,7 @@ struct MatchRecord { static let formatVersion = 3; var game: String; var mode: G
 }
 ```
 
-- [ ] **Step 1: 실패하는 테스트**
+- [x] **Step 1: 실패하는 테스트**
 
 `Tests/YachtDiceTests/OnlineMatchTests.swift`:
 ```swift
@@ -890,9 +890,9 @@ struct OnlineMatchTests {
 ```
 (`MatchStoreTests`에 `import GameCore`를 더한다. v2 JSON의 enum 인코딩 모양은 `JSONEncoder`가 `GameMode.solo`를 `{"solo":{}}`로 쓰는 것과 같다 — 다르면 기존 테스트 `왕복`이 저장한 파일을 `cat`해 맞춘다.)
 
-- [ ] **Step 2: 실패 확인** — `OnlineMatch` 없음으로 빌드 실패.
+- [x] **Step 2: 실패 확인** — `OnlineMatch` 없음으로 빌드 실패.
 
-- [ ] **Step 3: MatchRecord v3와 MatchStore**
+- [x] **Step 3: MatchRecord v3와 MatchStore**
 
 `App/Game/Participant.swift`의 `MatchRecord`:
 ```swift
@@ -954,7 +954,7 @@ struct MatchRecord: Codable, Equatable, Sendable {
 ```
 `save`는 그대로다(`isFinished`가 참이면 지운다). `OnlineMatch`는 끝난 판을 저장하지 않고 `clear`를 부른다(Step 4).
 
-- [ ] **Step 4: OnlineMatch<G>**
+- [x] **Step 4: OnlineMatch<G>**
 
 `App/Game/OnlineMatch.swift`:
 ```swift
@@ -1113,9 +1113,9 @@ final class OnlineMatch<G: Game> {
 ```
 `ThrowHint`의 `event`는 이 게임에서 "몇 번째 수"다. `hint` 인자의 `event`는 무시하고 `log.moves.count`로 바꿔 넣는다.
 
-- [ ] **Step 5: 통과 확인** — `-only-testing:YachtDiceTests/OnlineMatchTests -only-testing:YachtDiceTests/MatchStoreTests`. `조작_거부`에서 두 수 연속 로그의 두 번째 수는 좌석 0 차례(내 좌석 = B의 상대… B 기준 localSeat = 1, 8,8은 좌석 1 차례라 `seat != localSeat`가 거짓) → 첫 수(8,8)부터 거부되어 `moves.count == 1`이어야 한다. 아니면 검증 순서를 살핀다.
+- [x] **Step 5: 통과 확인** — `-only-testing:YachtDiceTests/OnlineMatchTests -only-testing:YachtDiceTests/MatchStoreTests`. `조작_거부`에서 두 수 연속 로그의 두 번째 수는 좌석 0 차례(내 좌석 = B의 상대… B 기준 localSeat = 1, 8,8은 좌석 1 차례라 `seat != localSeat`가 거짓) → 첫 수(8,8)부터 거부되어 `moves.count == 1`이어야 한다. 아니면 검증 순서를 살핀다.
 
-- [ ] **Step 6: 커밋** — `git add -A && git commit -m "feat(game): 게임에 무관한 OnlineMatch 세션과 v3 기록 형식을 더한다"`
+- [x] **Step 6: 커밋** — `git add -A && git commit -m "feat(game): 게임에 무관한 OnlineMatch 세션과 v3 기록 형식을 더한다"`
 
 ---
 
@@ -1140,7 +1140,7 @@ var currentGame: GameID?
 ```
   식별자: 허브 타일 `hub.<game>`(예 `hub.yacht`, `hub.omok`), 허브 전적 카드 `hub.records`, 게임 메뉴 뒤로가기 `menu.back`, 오목 메뉴 `menu.omok.local`, `menu.omok.online`, 오목 로컬 시작 `menu.omok.local.start`. 요트 메뉴의 기존 식별자(`menu.solo`, `menu.bot`, `menu.local`, `menu.online`, `menu.resume`, `menu.settings`)는 그대로다.
 
-- [ ] **Step 1: 실패하는 단위 테스트**
+- [x] **Step 1: 실패하는 단위 테스트**
 
 `Tests/YachtDiceTests/AppContainerTests.swift`에 더한다(기존 `case .menu`를 기대하는 테스트는 `.hub`로 바꾼다 — 저장된 판이 없으면 허브에서 시작한다. `resumeSavedGame` 테스트는 허브에서 이어하기가 열리므로 그대로 `.playing`을 기대한다):
 ```swift
@@ -1188,9 +1188,9 @@ var currentGame: GameID?
 ```
 (`openSupabaseMatch(_:localUid:transport:)`는 테스트용 오버로드다 — 아래 Step 3.)
 
-- [ ] **Step 2: 실패 확인** — `GameID`, `showMenu` 없음.
+- [x] **Step 2: 실패 확인** — `GameID`, `showMenu` 없음.
 
-- [ ] **Step 3: GameCatalog와 AppContainer**
+- [x] **Step 3: GameCatalog와 AppContainer**
 
 `App/Games/GameCatalog.swift`:
 ```swift
@@ -1280,7 +1280,7 @@ enum GameID: String, CaseIterable, Sendable {
 ```
 - `PushRegistration.shared.currentMatchID` 클로저는 `.playingOmok(let m)`도 본다(`case .online(let id) = m.mode`).
 
-- [ ] **Step 4: 허브·메뉴 화면**
+- [x] **Step 4: 허브·메뉴 화면**
 
 `App/Views/HubScreen.swift`:
 ```swift
@@ -1420,7 +1420,7 @@ struct OmokMenu: View {
 
 `App/YachtDiceApp.swift`의 `switch`: `.hub → HubScreen`, `.menu(.yacht) → MenuScreen`, `.menu(.omok) → OmokMenu`, `.menu → HubScreen`(준비 중 게임은 허브가 막는다), `.playing → GameScreen`, `.playingOmok(let match) → OmokScreen(match: match, onReturn: { container.returnToMenu() })`. `OmokScreen`은 Task 6이 만들므로 이 Task에서는 `App/Games/Omok/OmokScreen.swift`에 최소 화면을 둔다: 상단에 `PlayerStrip`은 `GameSession`에 묶여 있어 못 쓰므로 `Text("오목")`와 "메뉴로" 버튼(`header.menu`)만 둔 자리 표시자이며 Task 6이 교체한다.
 
-- [ ] **Step 5: UI 테스트 갱신**
+- [x] **Step 5: UI 테스트 갱신**
 
 모든 UI 테스트에서 요트 메뉴에 들어가기 전에 허브 타일을 누른다. 공통 도우미를 `Tests/YachtDiceUITests/FullGameUITests.swift`의 `XCUIElement` 확장 옆에 둔다:
 ```swift
@@ -1450,9 +1450,9 @@ extension XCUIApplication {
     }
 ```
 
-- [ ] **Step 6: 단위·UI 테스트 통과** — 단위 전체와 `-only-testing:YachtDiceUITests`.
+- [x] **Step 6: 단위·UI 테스트 통과** — 단위 전체와 `-only-testing:YachtDiceUITests`.
 
-- [ ] **Step 7: 커밋** — `git add -A && git commit -m "feat(hub): 게임 허브와 게임별 메뉴를 두고 오목 매치를 연다"`
+- [x] **Step 7: 커밋** — `git add -A && git commit -m "feat(hub): 게임 허브와 게임별 메뉴를 두고 오목 매치를 연다"`
 
 ---
 
@@ -1466,7 +1466,7 @@ extension XCUIApplication {
 - Consumes: Task 4 `OnlineMatch<Omok>`(`state`, `play`, `isLocalTurn`, `onRemoteMove`, `lastRemoteMove`, `outcome`, `opponentPresent`, `isConnected`, `lastTransportError`, `participants`, `localSeat`).
 - Produces: `struct OmokBoardView: View { let state: Omok.State; let preview: Omok.Move?; let highlight: Omok.Move?; let animating: Omok.Move?; var onTap: (Omok.Move) -> Void }`, `enum OmokGeometry { static func move(at point: CGPoint, in size: CGSize) -> Omok.Move?; static func point(of move: Omok.Move, in size: CGSize) -> CGPoint }`.
 
-- [ ] **Step 1: 실패하는 기하 테스트**
+- [x] **Step 1: 실패하는 기하 테스트**
 
 `Tests/YachtDiceTests/OmokBoardTests.swift`:
 ```swift
@@ -1493,9 +1493,9 @@ struct OmokBoardTests {
 }
 ```
 
-- [ ] **Step 2: 실패 확인** — `OmokGeometry` 없음.
+- [x] **Step 2: 실패 확인** — `OmokGeometry` 없음.
 
-- [ ] **Step 3: 판 뷰**
+- [x] **Step 3: 판 뷰**
 
 `App/Games/Omok/OmokBoardView.swift`:
 ```swift
@@ -1588,7 +1588,7 @@ struct OmokBoardView: View {
 ```
 (`GraphicsContext`는 값 형식이라 `drawStone`에서 `var context = context`로 받아 `opacity`를 바꾼다.)
 
-- [ ] **Step 4: 화면**
+- [x] **Step 4: 화면**
 
 `App/Games/Omok/OmokScreen.swift`:
 ```swift
@@ -1753,7 +1753,7 @@ struct OmokScreen: View {
 ```
 `animating`은 `onRemoteMove`가 로그에 더해지기 전에 불리므로 그 자리에 돌이 아직 없다 — `OmokBoardView`에 `animating` 돌을 `state`와 별개로 그리도록 `if let animating, state.stone(...) == 0 { drawStone(... black: Omok.currentSeat(state) == 0, radius * 1.25) }`를 더한다. `GameMode`에 `var isOnline: Bool { if case .online = self { true } else { false } }`를 더한다(`App/Game/Participant.swift`). `.onChange(of: match.log.moves.count)`의 `match.mode.isOnline || true`는 지우고 항상 배너를 보인다.
 
-- [ ] **Step 5: UI 테스트**
+- [x] **Step 5: UI 테스트**
 
 `Tests/YachtDiceUITests/OmokUITests.swift`:
 ```swift
@@ -1794,9 +1794,9 @@ final class OmokUITests: XCTestCase {
 }
 ```
 
-- [ ] **Step 6: 통과 확인** — 단위(`OmokBoardTests`) + `-only-testing:YachtDiceUITests/OmokUITests`. 탭 좌표가 어긋나면 `omok.board`의 프레임이 정사각형인지(`aspectRatio`) 스크린샷으로 본다.
+- [x] **Step 6: 통과 확인** — 단위(`OmokBoardTests`) + `-only-testing:YachtDiceUITests/OmokUITests`. 탭 좌표가 어긋나면 `omok.board`의 프레임이 정사각형인지(`aspectRatio`) 스크린샷으로 본다.
 
-- [ ] **Step 7: 커밋** — `git add -A && git commit -m "feat(omok): 오목 판과 화면, 로컬 2인 완주"`
+- [x] **Step 7: 커밋** — `git add -A && git commit -m "feat(omok): 오목 판과 화면, 로컬 2인 완주"`
 
 ---
 
@@ -1827,7 +1827,7 @@ struct RecentMatch: Equatable { let id: UUID; let game: String; let opponent: St
 ```
   `SupabaseService.upsertProfile(player:name:)`, `SupabaseService.fetchRecords(player:)`, `SupabaseService.fetchFinished(limit:)`.
 
-- [ ] **Step 1: 실패하는 테스트**
+- [x] **Step 1: 실패하는 테스트**
 
 `Tests/YachtDiceTests/GameCenterServiceTests.swift`:
 ```swift
@@ -1900,9 +1900,9 @@ struct RecordsStoreTests {
 }
 ```
 
-- [ ] **Step 2: 실패 확인** — `GameCenterAuthenticating`, `RecordsStore` 없음.
+- [x] **Step 2: 실패 확인** — `GameCenterAuthenticating`, `RecordsStore` 없음.
 
-- [ ] **Step 3: GameCenterService 다시 쓰기**
+- [x] **Step 3: GameCenterService 다시 쓰기**
 
 `App/Online/GameCenterService.swift` 전체:
 ```swift
@@ -2009,7 +2009,7 @@ struct UncheckedSendable<T>: @unchecked Sendable {
 ```
 `Mutex`는 `import Synchronization`(iOS 18)으로 쓴다. `Dismisser`의 delegate 메서드는 `nonisolated`가 필요하면 `MainActor.assumeIsolated`로 감싼다.
 
-- [ ] **Step 4: 서버 연결과 전적 저장소**
+- [x] **Step 4: 서버 연결과 전적 저장소**
 
 `App/Online/SupabaseService.swift`에 더한다:
 ```swift
@@ -2091,7 +2091,7 @@ final class RecordsStore {
 }
 ```
 
-- [ ] **Step 5: 앱에 잇기**
+- [x] **Step 5: 앱에 잇기**
 
 - `AppContainer`: `let records: RecordsStore`를 `init`에서 `RecordsStore(service: supabase, gameCenter: gameCenter)`로 만들고, `func bootstrap() async { await supabase.signIn(); await gameCenter.authenticate(); if let id = gameCenter.playerID, let name = gameCenter.displayName { await supabase.upsertProfile(player: id, name: name); if supabase.nickname.isEmpty { supabase.nickname = name } }; await records.reload() }`. `HubScreen`의 `.task { await container.bootstrap() }`. UI 테스트(`-noPush`) 때는 Game Center 로그인 창이 뜨지 않도록 `arguments.contains("-noGameCenter")`이면 `gameCenter.authenticate()`를 건너뛴다 — UI 테스트 `launchArguments`에 `"-noGameCenter"`를 더한다.
 - `OnlineMenu`: `createRoom`·`joinRoom`에 `player: container.gameCenter.playerID`를 넘긴다(Task 5의 임시 `playerID`는 이 Task에서 실제 값이 된다).
@@ -2100,7 +2100,7 @@ final class RecordsStore {
 - `App/Views/RecordsScreen.swift`: 게임별 카드(승·패·무·승률)와 최근 열 개 목록, 툴바 "리더보드" 버튼(`container.gameCenter.presentLeaderboards()`, 미로그인이면 비활성). 식별자 `records.leaderboard`.
 - `App/YachtDice.entitlements`에 `com.apple.developer.game-center` `<true/>`를 되살린다(`aps-environment`와 함께).
 
-- [ ] **Step 6: App Store Connect — Game Center와 리더보드**
+- [x] **Step 6: App Store Connect — Game Center와 리더보드**
 
 `Tools/Release/asc.swift`로 시도한다(`ASC_KEY_PATH=~/Downloads/AuthKey_5G83CW4V3P.p8 ASC_KEY_ID=5G83CW4V3P ASC_ISSUER_ID=837de746-ac77-4806-801d-9765067971fa`):
 1. App ID 기능: `post /v1/bundleIdCapabilities '{"data":{"type":"bundleIdCapabilities","attributes":{"capabilityType":"GAME_CENTER"},"relationships":{"bundleId":{"data":{"type":"bundleIds","id":"5SNA4TBXJ9"}}}}}'`.
@@ -2109,9 +2109,9 @@ final class RecordsStore {
 4. 리더보드를 라이브로: `post /v1/gameCenterLeaderboardReleases '{"data":{"type":"gameCenterLeaderboardReleases","relationships":{"gameCenterDetail":{...<detail>},"gameCenterLeaderboard":{...<lb>}}}}'`.
 어느 단계든 403이면 App Manager 권한 밖이므로 남은 단계를 사용자 작업으로 적는다: App Store Connect → 앱 → 서비스 → Game Center에서 리더보드 `wins.yacht`·`wins.omok`·`wins.cuppong`·`wins.alkkagi`(정수, 내림차순)를 만든다.
 
-- [ ] **Step 7: 통과 확인** — 단위 전체. `DEVELOPMENT_TEAM=9P8KX3RJRR xcodegen generate` 뒤 시뮬레이터 빌드가 엔타이틀먼트로 실패하지 않아야 한다(시뮬레이터는 무시한다).
+- [x] **Step 7: 통과 확인** — 단위 전체. `DEVELOPMENT_TEAM=9P8KX3RJRR xcodegen generate` 뒤 시뮬레이터 빌드가 엔타이틀먼트로 실패하지 않아야 한다(시뮬레이터는 무시한다).
 
-- [ ] **Step 8: 커밋** — `git add -A && git commit -m "feat(records): Game Center 신원과 profiles, 전적 화면, 리더보드 제출"`
+- [x] **Step 8: 커밋** — `git add -A && git commit -m "feat(records): Game Center 신원과 profiles, 전적 화면, 리더보드 제출"`
 
 ---
 
@@ -2120,7 +2120,7 @@ final class RecordsStore {
 **Files:**
 - Modify: `Tests/YachtDiceTests/SupabaseE2ETests.swift`, `README.md`, `docs/superpowers/specs/2026-09-10-p7-game-hub-omok-design.md`, `project.yml`(`CURRENT_PROJECT_VERSION: 5`)
 
-- [ ] **Step 1: 오목 통합 테스트**
+- [x] **Step 1: 오목 통합 테스트**
 
 `SupabaseE2ETests.swift`에 더한다(`import GameCore`):
 ```swift
@@ -2168,12 +2168,12 @@ final class RecordsStore {
 ```
 `SupabaseTurnTransport.publish`는 재시도 3회 뒤 던지므로 마지막 `#expect(throws:)`는 약 2.4초 걸린다.
 
-- [ ] **Step 2: 통합 실행** — `TEST_RUNNER_YACHT_SUPABASE_E2E=1 ... -only-testing:YachtDiceTests/SupabaseE2ETests`. 요트 8개 + 오목 1개 통과. 익명 가입 한도(시간당 30회)에 걸리면 한 시간 뒤 다시 돈다.
+- [x] **Step 2: 통합 실행** — `TEST_RUNNER_YACHT_SUPABASE_E2E=1 ... -only-testing:YachtDiceTests/SupabaseE2ETests`. 요트 8개 + 오목 1개 통과. 익명 가입 한도(시간당 30회)에 걸리면 한 시간 뒤 다시 돈다.
 
-- [ ] **Step 3: 문서** — README에 "게임 허브" 절을 더해 `GameCore`·`OnlineMatch`·`records`·Game Center(선택 로그인, 리더보드 ID 넷) 구조를 적고, 온라인 절의 `matches` 열 목록에 `game`·`host_player`·`guest_player`·`winner_seat`를 더하며, 새 게임을 붙이는 세 조각(규칙 파일·화면·`AppContainer` 갈래)을 적는다. 스펙 상태를 "구현 완료 (날짜)"로 바꾼다.
+- [x] **Step 3: 문서** — README에 "게임 허브" 절을 더해 `GameCore`·`OnlineMatch`·`records`·Game Center(선택 로그인, 리더보드 ID 넷) 구조를 적고, 온라인 절의 `matches` 열 목록에 `game`·`host_player`·`guest_player`·`winner_seat`를 더하며, 새 게임을 붙이는 세 조각(규칙 파일·화면·`AppContainer` 갈래)을 적는다. 스펙 상태를 "구현 완료 (날짜)"로 바꾼다.
 
-- [ ] **Step 4: 전체 검증** — 단위 전체, UI 전체(`-only-testing:YachtDiceUITests`), 통합. 셋 다 통과.
+- [x] **Step 4: 전체 검증** — 단위 전체, UI 전체(`-only-testing:YachtDiceUITests`), 통합. 셋 다 통과.
 
-- [ ] **Step 5: TestFlight** — `project.yml`의 `CURRENT_PROJECT_VERSION`을 5로 올리고 `DEVELOPMENT_TEAM=9P8KX3RJRR ASC_KEY_PATH=... Tools/Release/upload.sh`. 처리가 끝나면 `asc.swift`로 외부 그룹 `5bcb4a46-f292-4704-b255-c286a8bdcbc5`에 붙이고 이전 빌드를 만료한 뒤 `betaAppReviewSubmissions`에 제출한다(P6과 같은 절차).
+- [ ] **Step 5: TestFlight** — `project.yml`의 `CURRENT_PROJECT_VERSION`을 5로 올리고 `DEVELOPMENT_TEAM=9P8KX3RJRR ASC_KEY_PATH=... Tools/Release/upload.sh`. 처리가 끝나면 `asc.swift`로 외부 그룹 `5bcb4a46-f292-4704-b255-c286a8bdcbc5`에 붙이고 이전 빌드를 만료한 뒤 `betaAppReviewSubmissions`에 제출한다(P6과 같은 절차). (컨트롤러 결정: 이 단계는 이 브랜치가 머지된 뒤 컨트롤러가 직접 한다. 담당 에이전트는 빌드 번호만 5로 올리고 리제너레이트한다.)
 
-- [ ] **Step 6: 커밋** — `git add -A && git commit -m "docs: P7 완료 반영과 빌드 5"` 뒤 `git push origin main`.
+- [x] **Step 6: 커밋** — `git add -A && git commit -m "docs: P7 완료 반영과 빌드 5"` 뒤 `git push origin main`.

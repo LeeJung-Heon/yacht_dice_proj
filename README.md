@@ -1,6 +1,6 @@
 # 요트 다이스 (Yacht Dice)
 
-닌텐도 『세계의 게임 대전 51』의 Yacht Dice를 레퍼런스로 삼은 iOS 네이티브 야추 다이스 게임으로, RealityKit 3D 주사위와 이벤트 소싱 규칙 엔진 위에 세로 화면 전용으로 만들었으며 혼자 연습, 컴퓨터 대전(3단계), 같은 기기 2~4인, Supabase 방 코드 온라인 대전을 지원한다.
+닌텐도 『세계의 게임 대전 51』의 Yacht Dice를 레퍼런스로 삼은 iOS 네이티브 야추 다이스 게임에서 출발해 지금은 시작 화면이 요트 다이스·오목·컵퐁·알까기 네 게임의 허브가 되었고 오목까지 실제로 눌리며(컵퐁·알까기는 타일만 있는 준비 중), RealityKit 3D 주사위와 이벤트 소싱 규칙 엔진 위에 세로 화면 전용으로 만들었으며 요트는 혼자 연습·컴퓨터 대전(3단계)·같은 기기 2~4인을, 오목은 같은 기기 2인을 지원하고 두 게임 모두 Supabase 방 코드 온라인 대전과 선택적인 Game Center 로그인·전적·리더보드를 지원한다.
 
 ## 빌드
 
@@ -60,6 +60,12 @@ SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
 
 가죽·호두나무·주사위 눈은 `App/Scene3D/ProceduralTexture.swift`의 결정적 노이즈로 앱 시작 시 그리므로 외부 텍스처와 모델 파일이 없으며, 트레이의 보이는 모양(모서리 라운드, 선반 패드)은 자유롭게 바꿔도 되지만 주사위가 닿는 면의 위치(`TrayGeometry`)는 구운 궤적과 맞물려 있어 바꾸면 다시 구워야 한다.
 
+## 게임 허브
+
+시작 화면은 `AppContainer.Status.hub`로, 요트 다이스·오목·컵퐁·알까기 네 타일을 보여 주고 컵퐁·알까기는 아직 흐린 "준비 중" 상태다. 요트가 아닌 게임의 규칙은 `Packages/GameCore`의 `Game` 프로토콜(초기 상태·수를 둘 수 있는지·다음 좌석·승부 결과를 순수 함수로만 정의)과 `MoveLog<G>`(수 목록이 곧 판이고 서버 `log` 열의 JSON과 그대로 왕복)로 게임마다 갈라지며, 전송·검증·재생·Presence·연결 상태·끝남 알림은 게임에 무관한 `OnlineMatch<G>`(`App/Game/OnlineMatch.swift`) 하나가 맡아 요트 전용 `GameSession`과 `TurnTransport`를 함께 쓴다. 전적은 서버 `records` 뷰를 `RecordsStore`가 읽어 허브 카드와 최근 매치 목록에 보여 주며, Game Center 로그인은 선택이라 로그인하면 표시 이름이 닉네임이 되고 `gamePlayerID`로 전적이 앱을 지웠다 깔아도 이어지고, 로그인하지 않으면 그 기기의 익명 계정 uid로 전적이 남는다. 로그인한 사용자의 게임별 승수는 값이 바뀔 때만 리더보드 `wins.yacht`·`wins.omok`·`wins.cuppong`·`wins.alkkagi`에 오르며, UI 테스트는 GameKit 로그인 창을 넘길 수 없어 `AppContainer`에 launchArguments `-noGameCenter`를 주어 인증을 건너뛴다.
+
+새 게임을 붙이는 데는 세 조각이면 된다: `Packages/GameCore`에 `Game`을 구현한 규칙 파일 하나(오목의 `Omok.swift`처럼 상태·수·승부 판정을 외부 의존성 없이 순수 함수로만 적는다), 그 게임의 화면(오목은 `App/Games/Omok/OmokScreen.swift`와 `OmokBoardView.swift`), 그리고 `AppContainer`에 그 게임을 여는 갈래 하나(`Status`에 케이스를 더하고 `resumeSavedGame`·`openSupabaseMatch`의 `GameID` 분기에 `OnlineMatch(game:mode:participants:log:transport:)`로 세션을 만들어 끼우는 함수를 오목의 `launchOmok`처럼 둔다) — 허브 타일, 전송, 전적 읽기·리더보드 제출은 그대로 재사용된다.
+
 ## 실기기에 설치하기
 
 유료 개발자 계정 없이 무료 Apple ID의 개인 팀으로 설치할 수 있으며, 프로필이 7일마다 만료되고 기기는 팀당 3대까지라 테스트 용도에 맞고, 아이폰은 iOS 18 이상이어야 한다.
@@ -95,15 +101,17 @@ SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
 4. App Store Connect → TestFlight 탭에서 빌드 처리가 끝나면(보통 10분 안쪽) 외부 테스트 그룹을 만들고 Test Information에 연락처 이메일과 개인정보처리방침 URL(`docs/privacy-policy.md`를 GitHub Pages나 저장소 링크로)을 넣은 뒤 빌드를 그룹에 붙이면 첫 빌드는 간단한 Beta App Review를 거친다.
 5. 그룹의 Public Link를 켜 링크를 나누면 받는 사람은 TestFlight 앱을 설치하고 링크를 눌러 받으며, 빌드는 90일 뒤 만료되고 새 빌드를 올릴 때는 `project.yml`의 `CURRENT_PROJECT_VERSION`을 1 올린다.
 
-유료 계정이 생기면 Game Center도 쓸 수 있는데, 포털의 앱 ID에 Game Center를 켜고 `project.yml`에 `CODE_SIGN_ENTITLEMENTS: App/YachtDice.entitlements`를 되살린 뒤 온라인 메뉴를 Game Center 버전으로 바꾸면 매치메이커와 턴 알림이 붙는다.
+Game Center 엔타이틀먼트(`App/YachtDice.entitlements`)는 `project.yml`에 이미 걸려 있어 유료 팀으로 서명하면 로그인이 되며, 로그인은 선택이라 하면 표시 이름이 닉네임이 되고 게임별 승수가 리더보드 `wins.<게임>`에 오르고 안 해도 익명 계정으로 그대로 대전할 수 있다(자세한 구조는 "게임 허브" 절 참고).
 
 ## 온라인 대전
 
-온라인 대전은 Supabase 무료 티어(프로젝트 `yacht-dice`, 서울)로 동작하며, 기기마다 익명 로그인으로 계정 하나를 받고 6자리 방 코드로 상대와 만나며, 한 판은 `public.matches` 행 하나이고 매치 데이터는 `MatchLog` JSON 그대로다. 굴림·고정·기록 이벤트가 생길 때마다 행을 갱신하면 DB 트리거 `matches_broadcast`가 `realtime.broadcast_changes`로 비공개 채널 `match:<id>`에 행 전체를 쏘고, 상대는 그 채널을 세션 토큰으로 구독해 새 이벤트만 `GameState.canApply`로 검증한 뒤 재생하므로 기록부터 상대의 내 차례까지 0.1초 안팎이 걸리며, 소켓이 끊긴 사이의 변경은 3초 폴링이 같은 행을 읽어 채우고 앱이 앞으로 돌아오면 한 번 더 읽는다. 굴린 쪽은 궤적 ID·방향·회전 선택을 `throws` 열에 이벤트 번호와 함께 적어 두고 받는 쪽은 같은 값으로 재생하므로 두 화면이 같은 던지기를 보며, 같은 채널의 Presence로 상대의 접속을 명패의 점으로, 채널 상태로 연결 끊김을 띠로 보여 준다. 규칙 위반은 막지만 주사위는 각 클라이언트가 굴려 조작된 클라이언트의 "운 좋은 눈"은 막지 못하고(스펙 P2/P3 §7.4), 서버 쪽 RLS는 참가자만 행을 읽고 갱신하게 하며 `realtime.messages` 정책이 참가자만 그 토픽을 받게 하고, 방 입장은 `join_match` 함수가 대기 중인 빈 자리에만 넣으며, 좌석 교체는 트리거가 막고, 3일 넘게 멈춘 판은 `pg_cron`이 10분마다 `abandoned`로 바꿔 목록에 "상대가 떠남"으로 보인다.
+온라인 대전은 Supabase 무료 티어(프로젝트 `yacht-dice`, 서울)로 동작하며, 기기마다 익명 로그인으로 계정 하나를 받고 6자리 방 코드로 상대와 만나며, 한 판은 `public.matches` 행 하나다. 행은 어떤 게임인지를 `game` 열로, 호스트·게스트가 고른 게임별 플레이어(오목은 아직 안 쓰지만 자리는 있다)를 `host_player`·`guest_player` 열로, 끝났을 때의 승자 좌석을 `winner_seat` 열로 갖고, 매치 데이터는 게임마다 다른 모양의 JSON을 그대로 나른다 — 요트는 `MatchLog`, 그 외는 `GameCore`의 `MoveLog<G>`다. 굴림·고정·기록 이벤트가 생길 때마다 행을 갱신하면 DB 트리거 `matches_broadcast`가 `realtime.broadcast_changes`로 비공개 채널 `match:<id>`에 행 전체를 쏘고, 상대는 그 채널을 세션 토큰으로 구독해 새 이벤트만 `GameState.canApply`(요트) 또는 게임별 `Game.canApply`(그 외)로 검증한 뒤 재생하므로 기록부터 상대의 내 차례까지 0.1초 안팎이 걸리며, 소켓이 끊긴 사이의 변경은 3초 폴링이 같은 행을 읽어 채우고 앱이 앞으로 돌아오면 한 번 더 읽는다. 굴린 쪽은 궤적 ID·방향·회전 선택을 `throws` 열에 이벤트 번호와 함께 적어 두고 받는 쪽은 같은 값으로 재생하므로 두 화면이 같은 던지기를 보며, 같은 채널의 Presence로 상대의 접속을 명패의 점으로, 채널 상태로 연결 끊김을 띠로 보여 준다. 규칙 위반은 막지만 주사위는 각 클라이언트가 굴려 조작된 클라이언트의 "운 좋은 눈"은 막지 못하고(스펙 P2/P3 §7.4), 서버 쪽 RLS는 참가자만 행을 읽고 갱신하게 하며 `realtime.messages` 정책이 참가자만 그 토픽을 받게 하고, 방 입장은 `join_match` 함수가 대기 중인 빈 자리에만 넣으며, 좌석·게임·플레이어는 한 번 정해지면 트리거가 바꾸지 못하게 막고 끝난 매치는 아예 더 못 고치며, 3일 넘게 멈춘 판은 `pg_cron`이 10분마다 `abandoned`로 바꿔 목록에 "상대가 떠남"으로 보인다.
+
+Game Center로 로그인하면 `gamePlayerID`와 그 순간의 익명 uid를 security definer RPC `link_profile`이 `profiles` 테이블(`player`, `uid`, `name`)에 이어 두므로 앱을 지웠다 다시 깔아 uid가 바뀌어도 같은 `gamePlayerID`로 전적이 이어지고, 끝난 매치는 뷰 `records`가 `matches`에서 게임·플레이어(로그인했으면 `gamePlayerID`, 아니면 uid)별 승·패·무를 집계해 앱의 전적 카드와 Game Center 리더보드 제출의 원천이 된다.
 
 앱이 닫혀 있어도 차례가 오면 알림이 오는데, 온라인 메뉴에 들어올 때 알림 권한을 묻고 APNs 토큰을 `device_tokens`에 올리며, 내 턴이 끝나 `turn_seat`가 바뀌거나 게스트가 들어오면 트리거 `matches_turn_webhook`가 `pg_net`으로 Edge Function `notify-turn`을 부르고, 함수는 알릴 좌석의 토큰을 읽어 APNs(HTTP/2, ES256 JWT)로 "내 차례"를 보내며 죽은 토큰은 지우고, 알림을 탭하면 그 판이 열린다. 함수 시크릿은 `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`(.p8 본문), `APNS_BUNDLE_ID`, `WEBHOOK_SECRET`이며 `supabase secrets set --project-ref lkernselwouldtuialjh`로 넣고, `WEBHOOK_SECRET`은 Vault의 `webhook_secret`과 같은 값이어야 하며, 서버 SQL은 `supabase/migrations/`에, 함수는 `supabase/functions/notify-turn/`에 있고 JWT 생성은 `deno test supabase/functions/notify-turn/`으로 검증한다.
 
-검증은 세 층으로 되어 있는데, 메모리 전송으로 두 세션이 12턴을 완주하고 힌트로 같은 자세에 멈추는 단위 테스트, `YACHT_SUPABASE_E2E=1`을 주면 실제 프로젝트에 익명 계정 둘로 방 만들기·입장·턴 왕복과 전달 지연(중앙값 1.5초 아래), 낯선 계정의 구독 거부, Presence, 자세 재현, 폴링만으로의 전달을 확인하는 통합 테스트(`SupabaseE2ETests`), 그리고 시뮬레이터 두 대가 화면에서 코드로 만나 턴을 주고받는 것까지 확인했다.
+검증은 세 층으로 되어 있는데, 메모리 전송으로 두 세션이 12턴을 완주하고 힌트로 같은 자세에 멈추는 단위 테스트, `YACHT_SUPABASE_E2E=1`을 주면 실제 프로젝트에 익명 계정 둘로 방 만들기·입장·턴 왕복과 전달 지연(중앙값 1.5초 아래), 낯선 계정의 구독 거부, Presence, 자세 재현, 폴링만으로의 전달과, 오목 방을 만들어 다섯 수로 끝내고 `winner_seat`·`records`·끝난 매치의 불변까지 확인하는 통합 테스트(`SupabaseE2ETests`), 그리고 시뮬레이터 두 대가 화면에서 코드로 만나 턴을 주고받는 것까지 확인했다.
 
 ```sh
 TEST_RUNNER_YACHT_SUPABASE_E2E=1 xcodebuild -project YachtDice.xcodeproj -scheme YachtDice \
@@ -111,7 +119,7 @@ TEST_RUNNER_YACHT_SUPABASE_E2E=1 xcodebuild -project YachtDice.xcodeproj -scheme
   -only-testing:YachtDiceTests/SupabaseE2ETests test
 ```
 
-익명 계정은 앱을 지우면 사라지므로 진행 중인 매치도 함께 잃으며, 서버 설정은 대시보드에서 Anonymous sign-ins를 켜 두어야 하고, 익명 가입은 같은 IP에서 시간당 30회로 제한되어 통합 테스트를 한 시간에 여러 번 돌리면 `notSignedIn`(HTTP 429)으로 실패하므로 한 시간 뒤에 다시 돌린다. Game Center 턴제 매치 코드(`GameCenterService`, `GameCenterTurnTransport`, `MatchmakerView`)는 `App/Online`에 남겨 두었고, 켜려면 Apple Developer 포털에서 앱 ID에 Game Center를 활성화하고 엔타이틀먼트에 Game Center 키를 되살린 뒤 온라인 메뉴를 Game Center 버전으로 되돌리면 된다.
+익명 계정은 앱을 지우면 사라지므로 진행 중인 매치도 함께 잃으며(Game Center로 로그인해 두면 전적만은 `gamePlayerID`로 이어진다), 서버 설정은 대시보드에서 Anonymous sign-ins를 켜 두어야 하고, 익명 가입은 같은 IP에서 시간당 30회로 제한되어 통합 테스트를 한 시간에 여러 번 돌리면 `notSignedIn`(HTTP 429)으로 실패하므로 한 시간 뒤에 다시 돌린다. `GameCenterService`(`App/Online`)는 GameKit 턴제 매치가 아니라 신원 인증과 리더보드 제출만 맡으며, 대전 자체는 게임과 무관하게 Supabase로 돈다.
 
 ## 궤적 다시 굽기
 
