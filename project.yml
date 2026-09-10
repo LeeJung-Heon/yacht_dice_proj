@@ -43,7 +43,7 @@ targets:
         DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
         # 스토어 버전. TestFlight에 올릴 때마다 CURRENT_PROJECT_VERSION을 1씩 올린다.
         MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: 5
+        CURRENT_PROJECT_VERSION: 6
         # 푸시 알림(aps-environment)과 Game Center. 유료 팀이라 Xcode 자동 서명이
         # App ID의 Push Notifications·Game Center를 켠 프로파일을 받아 온다.
         CODE_SIGN_ENTITLEMENTS: App/YachtDice.entitlements

@@ -298,6 +298,43 @@ struct SupabaseE2ETests {
         #expect(theirs?.first { $0.game == "omok" }?.losses == 1)
     }
 
+    @Test("컵퐁 방에서 열 번 맞혀 끝내면 winner_seat가 남는다")
+    func 컵퐁_한_판() async throws {
+        let host = SupabaseService(client: makeClient())
+        let guest = SupabaseService(client: makeClient())
+        await host.signIn(); await guest.signIn()
+        let hostUid = try #require(host.uid), guestUid = try #require(guest.uid)
+        let room = try await host.createRoom(name: "A", game: "cuppong", player: nil)
+        let joined = try await guest.joinRoom(code: room.code, name: "B", player: nil)
+        let refreshed = try await host.fetchMatch(id: room.id)
+        let ta = SupabaseTurnTransport(client: host.client, matchID: room.id)
+        let tb = SupabaseTurnTransport(client: guest.client, matchID: room.id)
+        let a = OnlineMatch(game: CupPong.self, mode: .online(matchID: room.id.uuidString),
+                            participants: seatParticipants(localID: hostUid.uuidString, players: refreshed.seats(localUid: hostUid)),
+                            log: MoveLog<CupPong>(), transport: ta)
+        let b = OnlineMatch(game: CupPong.self, mode: .online(matchID: room.id.uuidString),
+                            participants: seatParticipants(localID: guestUid.uuidString, players: joined.seats(localUid: guestUid)),
+                            log: MoveLog<CupPong>(), transport: tb)
+        a.startListening(); b.startListening()
+        let deadline = ContinuousClock.now + .seconds(8)
+        while !(ta.isSubscribed && tb.isSubscribed), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(100)) }
+        let shots: [CupPong.Shot] = [
+            .init(dx: -207, power: 500), .init(dx: -69, power: 500), .init(dx: 69, power: 500), .init(dx: 207, power: 500),
+            .init(dx: -150, power: 450), .init(dx: 0, power: 450), .init(dx: 150, power: 450),
+            .init(dx: -81, power: 400), .init(dx: 81, power: 400), .init(dx: 0, power: 350),
+        ]
+        for shot in shots {
+            let ok = await a.play(shot)
+            #expect(ok, "\(shot) 실패: \(a.lastTransportError ?? "")")
+            let d = ContinuousClock.now + .seconds(10)
+            while b.log.moves.count != a.log.moves.count, ContinuousClock.now < d { try await Task.sleep(for: .milliseconds(50)) }
+            #expect(b.log.moves.count == a.log.moves.count, "상대에게 수가 가지 않았다")
+        }
+        #expect(a.outcome == .win(seat: 0) && b.outcome == .win(seat: 0))
+        let final = try await host.fetchMatch(id: room.id)
+        #expect(final.status == "finished" && final.winnerSeat == 0 && final.game == "cuppong")
+    }
+
     @Test("연결된 플레이어로만 방을 만들고 들어갈 수 있다")
     func 연결된_플레이어() async throws {
         let host = SupabaseService(client: makeClient())
