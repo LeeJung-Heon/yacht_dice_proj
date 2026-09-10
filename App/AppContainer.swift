@@ -102,6 +102,7 @@ final class AppContainer {
     }
 
     func returnToHub() {
+        stopCurrentGame()
         savedRecord = store.load()
         status = .hub
     }
@@ -129,14 +130,23 @@ final class AppContainer {
         guard let record = savedRecord ?? store.load() else { return }
         switch GameID(rawValue: record.game) {
         case .yacht: launch(record)
-        case .omok: launchOmok(record, transport: nil)
+        case .omok: if !launchOmok(record, transport: nil) { discardSavedGame() }
         default: return
         }
     }
 
+    /// 열 수 없는 저장을 지우고 허브로 돌린다. 남겨 두면 눌러도 아무 일이 없는 "이어하기"가 계속 뜬다.
+    private func discardSavedGame() {
+        try? store.clear()
+        savedRecord = nil
+        status = .hub
+    }
+
     func returnToMenu() {
+        let game = currentGame ?? .yacht
+        stopCurrentGame()
         savedRecord = store.load()
-        status = .menu(currentGame ?? .yacht)
+        status = .menu(game)
     }
 
     /// 한 기기에서 번갈아 두는 오목. 저장된 판은 새 판에 밀린다.
@@ -146,7 +156,7 @@ final class AppContainer {
         let participants: [Participant] = names.map { .human(name: $0) }
         let record = MatchRecord(game: Omok.id, mode: .passAndPlay(names: names), participants: participants,
                                  moveLog: (try? MoveLog<Omok>().encoded()) ?? Data())
-        launchOmok(record, transport: nil)
+        if !launchOmok(record, transport: nil) { discardSavedGame() }
     }
 
     /// 기록을 읽어 오목 판을 연다. 규칙에 어긋나는 로그면 열지 않고 이유를 남긴 채 거짓이다.
@@ -154,6 +164,11 @@ final class AppContainer {
     private func launchOmok(_ record: MatchRecord, transport: (any TurnTransport)?) -> Bool {
         guard let data = record.moveLog, let log = try? MoveLog<Omok>.decoded(from: data) else {
             onlineError = "오목 기록을 읽을 수 없다"
+            return false
+        }
+        // 좌석 수가 어긋난 기록은 `OnlineMatch`의 precondition에 걸려 앱이 죽는다. 여기서 돌려보낸다.
+        guard record.participants.count == Omok.seatCount else {
+            onlineError = "오목 기록의 자리 수가 맞지 않다"
             return false
         }
         let match = OnlineMatch(game: Omok.self, mode: record.mode, participants: record.participants, log: log, transport: transport)
@@ -167,6 +182,7 @@ final class AppContainer {
         } else {
             match.startListening()
         }
+        stopCurrentGame()
         status = .playingOmok(match)
         return true
     }
@@ -260,6 +276,17 @@ final class AppContainer {
         } else {
             session.resumeTurnOwner()
         }
+        stopCurrentGame()
         status = .playing(session)
+    }
+
+    /// 지금 열려 있는 판의 수신·재생 루프를 접는다. 화면을 떠난 세션이 계속 서버를 듣고 있으면
+    /// 새 판과 함께 두 세션이 같은 매치를 재생하고, 봇은 보이지 않는 곳에서 턴을 이어 둔다.
+    private func stopCurrentGame() {
+        switch status {
+        case .playing(let session): session.stop()
+        case .playingOmok(let match): match.stop()
+        default: break
+        }
     }
 }

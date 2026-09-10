@@ -50,11 +50,16 @@ struct OmokScreen: View {
                 if let moveToast { ScoreToast(text: moveToast).padding(.top, 118).transition(.move(edge: .top).combined(with: .opacity)) }
             }
         }
-        .task { match.onRemoteMove = { move, _ in await replayRemote(move) } }
+        .task { [animating = $animating] in
+            match.onRemoteMove = { move, _ in await Self.replayRemote(move, into: animating) }
+        }
+        // 훅을 남겨 두면 match가 클로저를, 클로저가 화면 상태를 붙잡은 채 판이 접히지 않는다.
+        .onDisappear { match.onRemoteMove = nil }
         .onChange(of: match.log.moves.count, initial: true) { _, _ in
             preview = nil
             if match.outcome == nil, let seat = Omok.currentSeat(match.state) {
-                showBanner(match.isLocalTurn ? "내 차례" : "\(seatNames[seat]) 차례")
+                // 로컬 2인은 두 좌석 다 내 것이라 "내 차례"가 아무것도 알려주지 않는다. 이름을 부른다.
+                showBanner(match.mode.isOnline && match.isLocalTurn ? "내 차례" : "\(seatNames[seat]) 차례")
             }
         }
         .onChange(of: match.lastRemoteMove?.id) { _, _ in
@@ -142,11 +147,14 @@ struct OmokScreen: View {
     }
 
     /// 상대 수를 잠깐 크게 그렸다 돌려놓는다. 이 함수가 끝난 뒤에야 로그에 더해진다.
-    private func replayRemote(_ move: Omok.Move) async {
-        withAnimation(.easeOut(duration: 0.25)) { animating = move }
+    ///
+    /// 화면 상태 바인딩만 받는 정적 함수다. 훅이 뷰 값을 담으면 그 안의 `match`까지 함께 잡혀
+    /// `match → onRemoteMove → match` 고리가 되고, 판을 떠나도 세션이 살아남는다.
+    private static func replayRemote(_ move: Omok.Move, into animating: Binding<Omok.Move?>) async {
+        withAnimation(.easeOut(duration: 0.25)) { animating.wrappedValue = move }
         SoundPlayer.shared.play(SoundSynth.stamp(), key: "stamp")
         try? await Task.sleep(for: .milliseconds(250))
-        animating = nil
+        animating.wrappedValue = nil
     }
 
     private func showBanner(_ text: String) {

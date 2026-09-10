@@ -58,6 +58,22 @@ struct AppContainerTests {
         #expect(resumed.state.stone(x: 7, y: 7) == 1)
     }
 
+    @Test("이어할 수 없는 오목 저장은 지우고 허브로 돌아간다")
+    func 못_이어하는_오목() throws {
+        let (store, directory) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // 같은 자리에 두 번 둔 로그라 재적용에서 거부된다
+        let 깨진_로그 = Data(#"{"moves":[{"x":7,"y":7},{"x":7,"y":7}]}"#.utf8)
+        try store.save(MatchRecord(game: Omok.id, mode: .passAndPlay(names: ["갑", "을"]),
+                                   participants: [.human(name: "갑"), .human(name: "을")], moveLog: 깨진_로그))
+        let container = AppContainer(store: store, arguments: [])
+        #expect(container.savedRecord != nil, "저장은 읽혀야 한다")
+        container.resumeSavedGame()
+        guard case .hub = container.status else { Issue.record("허브가 아니다: \(container.status)"); return }
+        #expect(container.savedRecord == nil)
+        #expect(MatchStore(directory: directory).load() == nil, "죽은 저장이 남아 이어하기 버튼이 계속 뜬다")
+    }
+
     @Test("모드를 고르면 그 모드의 세션이 만들어지고 저장된다")
     func 게임_시작() async throws {
         let (store, directory) = try makeStore()
