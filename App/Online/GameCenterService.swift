@@ -22,6 +22,9 @@ struct LiveAuthenticator: GameCenterAuthenticating {
             player.authenticateHandler = { viewController, error in
                 let presented = UncheckedSendable(viewController)
                 Task { @MainActor in
+                    // GameKit은 핸들러가 계속 걸려 있기를 바라므로 지우지 않는다. 대신 한 번 결론이 난
+                    // 뒤에 다시 불리면 아무것도 하지 않는다 — 이미 없는 continuation을 건드릴 수 없다.
+                    guard !done.withLock({ $0 }) else { return }
                     if let viewController = presented.value {
                         Self.topViewController()?.present(viewController, animated: true)
                         return   // 사용자가 창을 닫으면 핸들러가 다시 불린다
@@ -67,6 +70,8 @@ final class GameCenterService {
 
     private(set) var authState: AuthState = .unknown
     private let authenticator: any GameCenterAuthenticating
+    /// 진행 중인 인증. 둘째 호출은 새로 시작하지 않고 이것을 기다린다.
+    private var inFlight: Task<Void, Never>?
 
     init(authenticator: any GameCenterAuthenticating = LiveAuthenticator()) {
         self.authenticator = authenticator
@@ -76,16 +81,26 @@ final class GameCenterService {
     var playerID: String? { if case .authenticated(let id, _) = authState { id } else { nil } }
     var displayName: String? { if case .authenticated(_, let name) = authState { name } else { nil } }
 
-    /// 여러 번 불러도 안전하다. 허브로 돌아올 때마다 로그인 창이 다시 뜨면 안 되므로
-    /// 한 번 결론이 난 뒤에는(로그인이든 실패든) 아무것도 하지 않는다.
+    /// 여러 번 불러도 안전하다. 한 번 결론이 난 뒤에는(로그인이든 실패든) 아무것도 하지 않고,
+    /// 아직 진행 중이면 그 결과를 함께 기다린다 — 인증을 새로 걸면 GameKit의 핸들러가 갈리면서
+    /// 먼저 기다리던 쪽이 영영 깨어나지 못한다.
     func authenticate() async {
         guard case .unknown = authState else { return }
-        do {
-            let (id, name) = try await authenticator.authenticate()
-            authState = .authenticated(playerID: id, name: name)
-        } catch {
-            authState = .unavailable(error.localizedDescription)
+        if let inFlight {
+            await inFlight.value
+            return
         }
+        let task = Task { [authenticator] in
+            do {
+                let (id, name) = try await authenticator.authenticate()
+                authState = .authenticated(playerID: id, name: name)
+            } catch {
+                authState = .unavailable(error.localizedDescription)
+            }
+        }
+        inFlight = task
+        await task.value
+        inFlight = nil
     }
 
     /// 게임별 승수를 리더보드 `wins.<game>`에 올린다. 미로그인이면 아무것도 하지 않는다.

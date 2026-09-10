@@ -23,4 +23,18 @@ struct RecordsStoreTests {
         #expect(recent.map(\.opponent) == ["상대", "상대", "상대", "GC"])
         #expect(recent.map(\.game) == ["omok", "yacht", "omok", "omok"])
     }
+
+    @Test("같은 승수는 리더보드에 다시 올리지 않는다")
+    @MainActor
+    func 중복_제출() {
+        let store = RecordsStore(service: SupabaseService(), gameCenter: GameCenterService())
+        let 처음 = store.shouldSubmit(wins: 3, for: "omok")
+        let 같은_값 = store.shouldSubmit(wins: 3, for: "omok")
+        let 늘어난_값 = store.shouldSubmit(wins: 4, for: "omok")
+        let 다른_게임 = store.shouldSubmit(wins: 3, for: "yacht")
+        #expect(처음)
+        #expect(!같은_값)
+        #expect(늘어난_값)
+        #expect(다른_게임)
+    }
 }

@@ -26,6 +26,8 @@ final class AppContainer {
     let records: RecordsStore
     /// UI 테스트는 GameKit 로그인 창이 뜨면 진행하지 못한다. `-noGameCenter`면 인증을 건너뛴다.
     private let skipGameCenter: Bool
+    /// 로그인·신원 잇기를 이미 마쳤는가. 허브는 돌아올 때마다 `bootstrap()`을 부른다.
+    private var bootstrapped = false
     /// 온라인 매치를 열지 못한 이유. 온라인 메뉴가 보여준다.
     private(set) var onlineError: String?
 
@@ -68,14 +70,17 @@ final class AppContainer {
         }
     }
 
-    /// 앱이 뜰 때 한 번. 서버에 로그인하고 Game Center 신원을 잇고 전적을 읽는다.
+    /// 허브가 뜰 때마다 부른다. 로그인과 신원 잇기는 처음 한 번뿐이고, 전적만 매번 다시 읽는다.
     /// Game Center 로그인은 선택이라 실패해도 나머지는 그대로 돈다.
     func bootstrap() async {
-        await supabase.signIn()
-        if !skipGameCenter { await gameCenter.authenticate() }
-        if let id = gameCenter.playerID, let name = gameCenter.displayName {
-            await supabase.upsertProfile(player: id, name: name)
-            if supabase.nickname.isEmpty { supabase.nickname = name }
+        if !bootstrapped {
+            await supabase.signIn()
+            if !skipGameCenter { await gameCenter.authenticate() }
+            if let id = gameCenter.playerID, let name = gameCenter.displayName {
+                await supabase.upsertProfile(player: id, name: name)
+                if supabase.nickname.isEmpty { supabase.nickname = name }
+            }
+            bootstrapped = true
         }
         await records.reload()
     }

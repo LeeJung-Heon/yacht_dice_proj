@@ -27,6 +27,8 @@ final class RecordsStore {
     private let gameCenter: GameCenterService
     private(set) var records: [RecordRow] = []
     private(set) var recent: [RecentMatch] = []
+    /// 게임별로 리더보드에 마지막으로 올린 승수. 같은 값을 되풀이해 올리지 않는다.
+    private var submittedWins: [String: Int] = [:]
 
     init(service: SupabaseService, gameCenter: GameCenterService) {
         self.service = service
@@ -36,13 +38,24 @@ final class RecordsStore {
     /// 내 식별자: Game Center면 gamePlayerID, 아니면 uid. 서버 `records.player`와 같은 값이다.
     var me: String? { gameCenter.playerID ?? service.uid?.uuidString }
 
+    /// 허브에 돌아올 때마다 부른다. 읽지 못한 쪽은 이미 보여주던 값을 그대로 둔다 —
+    /// 잠깐 망이 끊겼다고 전적이 사라진 것처럼 보이면 안 된다.
     func reload() async {
         guard let me, let uid = service.uid else { return }
-        records = await service.fetchRecords(player: me)
-        recent = Self.summarize(rows: await service.fetchFinished(), me: me, myUid: uid)
+        if let rows = await service.fetchRecords(player: me) { records = rows }
+        if let rows = await service.fetchFinished() { recent = Self.summarize(rows: rows, me: me, myUid: uid) }
+        guard gameCenter.playerID != nil else { return }
         for row in records {
-            if let game = GameID(rawValue: row.game) { await gameCenter.submit(wins: row.wins, game: game) }
+            guard let game = GameID(rawValue: row.game), shouldSubmit(wins: row.wins, for: row.game) else { continue }
+            await gameCenter.submit(wins: row.wins, game: game)
         }
+    }
+
+    /// 이 승수를 리더보드에 올려야 하는가. 올릴 값이면 참을 주고 올린 것으로 기억한다.
+    func shouldSubmit(wins: Int, for game: String) -> Bool {
+        guard submittedWins[game] != wins else { return false }
+        submittedWins[game] = wins
+        return true
     }
 
     /// 끝난 행에서 내 좌석을 찾아 상대 이름과 승패를 뽑는다. 내 자리가 없는 행은 버린다.

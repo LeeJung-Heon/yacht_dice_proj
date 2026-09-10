@@ -76,7 +76,9 @@ final class FullGameUITests: XCTestCase {
 
         app.terminate()
         let relaunched = XCUIApplication()
-        relaunched.launch()   // -resetMatch 없이
+        // -resetMatch만 뺀다. 저장된 판은 살려야 하고, 알림·Game Center 창은 여전히 막아야 한다.
+        relaunched.launchArguments = ["-noPush", "-noGameCenter"]
+        relaunched.launch()
         relaunched.openYachtMenu()
 
         let resume = relaunched.buttons["menu.resume"]

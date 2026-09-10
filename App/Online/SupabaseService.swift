@@ -93,15 +93,16 @@ final class SupabaseService {
         _ = try? await client.rpc("link_profile", params: ["p_player": player, "p_name": name]).execute()
     }
 
-    /// 서버 `records` 뷰의 내 줄들. 게임마다 한 줄이다.
-    func fetchRecords(player: String) async -> [RecordRow] {
-        (try? await client.from("records").select().eq("player", value: player).execute().value) ?? []
+    /// 서버 `records` 뷰의 내 줄들. 게임마다 한 줄이다. 읽지 못했으면 nil — 빈 배열(정말 전적이
+    /// 없다)과 다르므로, 부르는 쪽이 이미 가진 값을 지우지 않게 가른다.
+    func fetchRecords(player: String) async -> [RecordRow]? {
+        try? await client.from("records").select().eq("player", value: player).execute().value
     }
 
-    /// 끝난 내 매치를 최근 순으로. RLS가 내가 낀 행만 보여준다.
-    func fetchFinished(limit: Int = 10) async -> [MatchRow] {
-        (try? await client.from("matches").select().eq("status", value: "finished")
-            .order("updated_at", ascending: false).limit(limit).execute().value) ?? []
+    /// 끝난 내 매치를 최근 순으로. RLS가 내가 낀 행만 보여준다. 읽지 못했으면 nil.
+    func fetchFinished(limit: Int = 10) async -> [MatchRow]? {
+        try? await client.from("matches").select().eq("status", value: "finished")
+            .order("updated_at", ascending: false).limit(limit).execute().value
     }
 
     /// 대기 방 취소나 끝난 판 정리. 참가자만 지울 수 있다(RLS).
