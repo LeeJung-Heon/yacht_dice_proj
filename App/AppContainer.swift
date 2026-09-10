@@ -68,7 +68,8 @@ final class AppContainer {
     }
 
     func resumeSavedGame() {
-        guard let record = savedRecord ?? store.load() else { return }
+        // v3부터 저장 파일이 요트 아닌 게임의 기록일 수 있다. GameSession은 요트 전용이라 여기서 거른다.
+        guard let record = savedRecord ?? store.load(), record.isYacht else { return }
         launch(record)
     }
 

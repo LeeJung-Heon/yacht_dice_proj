@@ -21,7 +21,7 @@ struct MenuScreen: View {
                     VStack(spacing: 14) {
                         titleLockup.padding(.top, 8).padding(.bottom, 10)
 
-                        if let saved = container.savedRecord {
+                        if let saved = container.savedRecord, saved.isYacht {
                             resumeCard(saved)
                         }
 

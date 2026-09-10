@@ -70,6 +70,24 @@ struct OnlineMatchTests {
         #expect(b.lastTransportError != nil && b.log.moves.count == 1)
     }
 
+    @Test("배치 일부만 받아들여도 그때까지 둔 수는 저장한다")
+    func 조작_부분_거부() async throws {
+        let (_, b, ta, _) = makePair()
+        var saved: Data?
+        b.onLogChanged = { saved = $0 }
+        // 좌석0(상대)의 정당한 첫 수 뒤에, 다음은 B(좌석1) 차례인데 상대가 대신 둔 것처럼 조작한 수를 잇는다.
+        // 두 수 연속을 같은 배치로 보내면 첫 수는 받아들이고 둘째 수에서 거부해야 한다.
+        var forged = MoveLog<Omok>()
+        _ = forged.append(Omok.Move(x: 7, y: 7))
+        _ = forged.append(Omok.Move(x: 8, y: 8))
+        try await ta.publish(TurnPayload(log: try forged.encoded(), eventCount: forged.moves.count, hints: [], turnSeat: 1, winnerSeat: nil, finished: false))
+        await b.waitForIncoming()
+        #expect(b.log.moves.count == 1 && b.lastTransportError != nil)
+        let savedData = try #require(saved, "받아들인 수까지는 저장해야 한다")
+        let savedLog = try MoveLog<Omok>.decoded(from: savedData)
+        #expect(savedLog.moves.count == 1)
+    }
+
     @Test("로컬 2인은 전송 없이 같은 객체에서 좌석이 번갈아 바뀐다")
     func 로컬_2인() async {
         let m = OnlineMatch(game: Omok.self, mode: .passAndPlay(names: ["갑", "을"]),

@@ -64,12 +64,27 @@ final class OnlineMatch<G: Game> {
         guard isLocalTurn, G.canApply(move, to: state) else { return false }
         if let hint { hints.append(ThrowHint(event: log.moves.count, trajectory: hint.trajectory, direction: hint.direction, yaws: hint.yaws)) }
         log.append(move)
-        onLogChanged?(outcome == nil ? try? log.encoded() : nil)
+        notifyLogChanged()
         await publish()
         return true
     }
 
     func encodedLog() throws -> Data { try log.encoded() }
+
+    /// 로그가 바뀌었다고 화면·저장소에 알린다. 끝났으면 nil(지우라는 뜻)을 준다.
+    /// 인코딩이 실패하면 — 끝나지 않았는데도 — 알리지 않는다. 알리면 저장소가 그 nil을 "지워라"로 읽어
+    /// 진행 중인 판을 잃기 때문이다. 대신 오류를 남긴다.
+    private func notifyLogChanged() {
+        guard outcome == nil else {
+            onLogChanged?(nil)
+            return
+        }
+        guard let encoded = try? log.encoded() else {
+            lastTransportError = "기록을 저장하지 못했다"
+            return
+        }
+        onLogChanged?(encoded)
+    }
 
     private func publish() async {
         guard let transport else { return }
@@ -124,6 +139,11 @@ final class OnlineMatch<G: Game> {
         }
         isReplaying = true
         defer { isReplaying = false }
+        // 배치 일부만 받아들여도(뒤엣것이 조작이라 거부돼도) 그때까지 둔 수는 잃지 않는다.
+        // isReplaying을 내리기 전에 알려야 화면이 재생 중 상태로 저장을 보므로, 이 defer를 나중에 선언해
+        // "알림 → isReplaying = false" 순서를 만든다(defer는 선언의 역순으로 실행된다).
+        var appended = false
+        defer { if appended { notifyLogChanged() } }
         for (offset, move) in theirs.moves.dropFirst(mine.count).enumerated() {
             // 상대가 보낸 수는 상대 좌석의 것이어야 한다. 내 좌석 차례의 수가 오면 조작이다.
             guard let seat = G.currentSeat(state), seat != localSeat, G.canApply(move, to: state) else {
@@ -133,10 +153,10 @@ final class OnlineMatch<G: Game> {
             let hint = hints.first { $0.event == mine.count + offset }
             await onRemoteMove?(move, hint)
             log.append(move)
+            appended = true
             lastRemoteMove = RemoteMove(seat: seat, move: move)
         }
         lastTransportError = nil
-        onLogChanged?(outcome == nil ? try? log.encoded() : nil)
     }
 
     /// 테스트용: 도착한 로그를 전부 재생할 때까지 기다린다(최대 2초).
