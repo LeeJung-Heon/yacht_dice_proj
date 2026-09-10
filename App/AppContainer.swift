@@ -123,10 +123,12 @@ final class AppContainer {
         launchOmok(record, transport: nil)
     }
 
-    private func launchOmok(_ record: MatchRecord, transport: (any TurnTransport)?) {
+    /// 기록을 읽어 오목 판을 연다. 규칙에 어긋나는 로그면 열지 않고 이유를 남긴 채 거짓이다.
+    @discardableResult
+    private func launchOmok(_ record: MatchRecord, transport: (any TurnTransport)?) -> Bool {
         guard let data = record.moveLog, let log = try? MoveLog<Omok>.decoded(from: data) else {
             onlineError = "오목 기록을 읽을 수 없다"
-            return
+            return false
         }
         let match = OnlineMatch(game: Omok.self, mode: record.mode, participants: record.participants, log: log, transport: transport)
         if transport == nil {
@@ -139,6 +141,7 @@ final class AppContainer {
             match.startListening()
         }
         status = .playingOmok(match)
+        return true
     }
 
     /// Supabase 행으로 게임을 연다. 게스트가 아직 없는 대기 방은 열지 않는다.
@@ -165,9 +168,9 @@ final class AppContainer {
             let participants = seatParticipants(localID: localUid.uuidString, players: row.seats(localUid: localUid))
             guard participants.contains(where: \.isHuman) else { onlineError = "이 매치에 내 자리가 없습니다"; return false }
             onlineError = nil
-            launchOmok(MatchRecord(game: Omok.id, mode: .online(matchID: row.id.uuidString), participants: participants, moveLog: row.log),
-                       transport: transport)
-            return true
+            return launchOmok(MatchRecord(game: Omok.id, mode: .online(matchID: row.id.uuidString),
+                                          participants: participants, moveLog: row.log),
+                              transport: transport)
         default:
             onlineError = "아직 지원하지 않는 게임이다: \(row.game)"
             return false
