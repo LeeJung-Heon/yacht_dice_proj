@@ -81,8 +81,11 @@ create table if not exists public.profiles (
   updated_at timestamptz not null default now()
 );
 alter table public.profiles enable row level security;
+drop policy if exists "profiles read" on public.profiles;
 create policy "profiles read" on public.profiles for select to authenticated using (true);
+drop policy if exists "profiles insert own" on public.profiles;
 create policy "profiles insert own" on public.profiles for insert to authenticated with check (uid = (select auth.uid()));
+drop policy if exists "profiles update own" on public.profiles;
 create policy "profiles update own" on public.profiles for update to authenticated
   using (uid = (select auth.uid())) with check (uid = (select auth.uid()));
 

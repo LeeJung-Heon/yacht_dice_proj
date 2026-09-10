@@ -78,6 +78,7 @@ public enum Omok: Game {
 - `join_match(p_code, p_name, p_player text default null)`이 게스트의 gamePlayerID도 받아 `guest_player`에 넣는다.
 - `matches_guard_seats` 트리거를 넓혀 `game`·`host_player`·`guest_player`의 교체와 `status = 'finished'` 뒤의 어떤 변경도 막는다.
 - `profiles(player text primary key, uid uuid not null, name text not null, updated_at timestamptz)`: Game Center 로그인 때 upsert하여 gamePlayerID ↔ 현재 익명 uid를 잇는다. RLS는 `uid = auth.uid()`인 행만 삽입·갱신하고, 읽기는 인증 사용자 전체에 연다(상대 이름 표시용).
+- 앱을 지우면 익명 uid가 새로 발급되므로 `matches`에 두 번째 SELECT 정책 `matches_select_linked_player`를 두어 `profiles`가 지금 내 uid에 이어 둔 `player`가 `host_player`·`guest_player` 중 하나인 행은 좌석 uid가 달라도 읽히게 하며, 갱신·삭제 정책은 uid 그대로라 예전 uid로 둔 판은 전적으로만 남고 고치지는 못한다. 좌석에 적히는 플레이어 문자열은 클라이언트가 보내는 값이라 `matches_guard_players`(BEFORE INSERT)와 `matches_guard_seats`(BEFORE UPDATE, 값이 새로 들어오거나 바뀔 때만)와 `join_match`가 모두 `profiles`에 그 uid로 이어진 플레이어인지 확인하고 아니면 `host player is not linked`처럼 거절해, 남의 gamePlayerID를 자기 판의 좌석에 적어 남의 전적을 늘리는 길을 막는다.
 - 전적은 따로 저장하지 않고 `status = 'finished'`인 `matches`에서 읽는다. 뷰 `records(player, game, wins, losses, draws)`는 참가자를 `coalesce(host_player, host_uid::text)`로 두어 Game Center 사용자는 gamePlayerID로, 미로그인 사용자는 uid로 집계되며, 상대별 전적과 최근 매치는 앱이 `matches`를 두 player 값으로 직접 조회한다. 뷰는 `security_invoker`로 두어 RLS를 지나며, 다른 사람의 전적 조회는 이번 범위에 없다.
 - 리더보드 제출은 클라이언트가 `records`의 자기 승수를 읽어 `GKLeaderboard.submitScore`로 올린다. 리더보드 ID는 `wins.yacht`, `wins.omok`, `wins.cuppong`, `wins.alkkagi`이며 App Store Connect API(`gameCenterDetails`, `gameCenterLeaderboards`)로 만들어 보고 안 되면 사용자 작업으로 넘긴다.
 - 요트도 `endMatch`에서 `winner_seat`를 쓰도록 하여 전적에 든다(총점 동점은 무승부).
@@ -137,3 +138,4 @@ SwiftUI `Canvas`로 나무색 판·격자·화점·돌·마지막 수 표식을 
 - Game Center 미로그인 전적은 기기 수명만큼이고, 여러 기기를 쓰는 사용자의 리더보드는 최신 제출 승수로 덮인다(승수는 서버에서 세므로 값은 같다).
 - 리더보드 넷은 App Store Connect에 있어야 하며 API로 못 만들면 사용자 작업이 된다.
 - 기존 Game Center 턴제 코드를 지우므로 Supabase 없이 도는 온라인 경로는 없다.
+- `link_profile`은 Game Center 서명을 서버에서 검증하지 않으므로 남의 `gamePlayerID` 문자열을 아는 사람이 그 값으로 RPC를 불러 프로필을 자기 uid로 가져갈 수 있고, 그러면 그 사람의 전적 연결이 통째로 넘어간다. 제대로 막으려면 `fetchItems(forIdentityVerificationSignature:)`의 서명을 Edge Function에서 애플 공개 키로 검증해야 하는데 이번 범위에서는 빼고, 대신 좌석의 플레이어는 반드시 이어진 프로필이어야 한다는 검증만 두어 이어 두지 않은 남의 id를 매치에 적는 쪽은 닫았다.

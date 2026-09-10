@@ -229,7 +229,7 @@ struct OnlineMenu: View {
         message = nil
         do {
             let room = try await service.createRoom(name: trimmedName, game: game.rawValue,
-                                                    player: container.gameCenter.playerID)
+                                                    player: service.linkedPlayer)
             waitingRoom = room
             waitForGuest(room)
         } catch {
@@ -240,7 +240,8 @@ struct OnlineMenu: View {
     /// 앱을 나갔다 와도 내 대기 방이 있으면 다시 코드를 보여주고 기다린다.
     private func resumeWaitingRoomIfAny() {
         guard waitingRoom == nil, let uid = service.uid,
-              let room = service.myMatches.first(where: { $0.isWaiting && $0.hostUid == uid }) else { return }
+              let room = service.myMatches.first(where: { $0.isWaiting && $0.hostUid == uid && $0.game == game.rawValue })
+        else { return }
         waitingRoom = room
         waitForGuest(room)
     }
@@ -300,7 +301,7 @@ struct OnlineMenu: View {
         entryStatus = "입장 중…"
         do {
             let row = try await service.joinRoom(code: codeInput, name: trimmedName,
-                                                player: container.gameCenter.playerID)
+                                                player: service.linkedPlayer)
             await enterGame(row, announcing: "\(row.hostName)의 방에 들어왔다 — 게임을 시작한다")
         } catch {
             entryStatus = nil

@@ -21,6 +21,7 @@ xcodebuild -project YachtDice.xcodeproj -scheme YachtDice \
 swift test --package-path Packages/YachtCore
 swift test --package-path Packages/DiceTrajectory
 swift test --package-path Packages/YachtBot
+swift test --package-path Packages/GameCore
 ```
 
 ## 구조
@@ -62,7 +63,7 @@ SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
 
 ## 게임 허브
 
-시작 화면은 `AppContainer.Status.hub`로, 요트 다이스·오목·컵퐁·알까기 네 타일을 보여 주고 컵퐁·알까기는 아직 흐린 "준비 중" 상태다. 요트가 아닌 게임의 규칙은 `Packages/GameCore`의 `Game` 프로토콜(초기 상태·수를 둘 수 있는지·다음 좌석·승부 결과를 순수 함수로만 정의)과 `MoveLog<G>`(수 목록이 곧 판이고 서버 `log` 열의 JSON과 그대로 왕복)로 게임마다 갈라지며, 전송·검증·재생·Presence·연결 상태·끝남 알림은 게임에 무관한 `OnlineMatch<G>`(`App/Game/OnlineMatch.swift`) 하나가 맡아 요트 전용 `GameSession`과 `TurnTransport`를 함께 쓴다. 전적은 서버 `records` 뷰를 `RecordsStore`가 읽어 허브 카드와 최근 매치 목록에 보여 주며, Game Center 로그인은 선택이라 로그인하면 표시 이름이 닉네임이 되고 `gamePlayerID`로 전적이 앱을 지웠다 깔아도 이어지고, 로그인하지 않으면 그 기기의 익명 계정 uid로 전적이 남는다. 로그인한 사용자의 게임별 승수는 값이 바뀔 때만 리더보드 `wins.yacht`·`wins.omok`·`wins.cuppong`·`wins.alkkagi`에 오르며, UI 테스트는 GameKit 로그인 창을 넘길 수 없어 `AppContainer`에 launchArguments `-noGameCenter`를 주어 인증을 건너뛴다.
+시작 화면은 `AppContainer.Status.hub`로, 요트 다이스·오목·컵퐁·알까기 네 타일을 보여 주고 컵퐁·알까기는 아직 흐린 "준비 중" 상태다. 요트가 아닌 게임의 규칙은 `Packages/GameCore`의 `Game` 프로토콜(초기 상태·수를 둘 수 있는지·다음 좌석·승부 결과를 순수 함수로만 정의)과 `MoveLog<G>`(수 목록이 곧 판이고 서버 `log` 열의 JSON과 그대로 왕복)로 게임마다 갈라지며, 전송·검증·재생·Presence·연결 상태·끝남 알림은 게임에 무관한 `OnlineMatch<G>`(`App/Game/OnlineMatch.swift`) 하나가 맡아 요트 전용 `GameSession`과 `TurnTransport`를 함께 쓴다. 전적은 서버 `records` 뷰를 `RecordsStore`가 읽어 허브 카드와 최근 매치 목록에 보여 주며, Game Center 로그인은 선택이라 로그인하면 표시 이름이 닉네임이 되고 `gamePlayerID`로 전적이 앱을 지웠다 깔아도 이어지고, 로그인하지 않으면 그 기기의 익명 계정 uid로 전적이 남는다. 앱을 지우면 익명 계정이 사라져 새 uid를 받으므로 좌석 uid만 보는 정책으로는 예전 판이 통째로 안 보이는데, 로그인할 때마다 `link_profile`이 `gamePlayerID`를 지금 uid에 다시 이어 두고 `matches`에 그 연결을 지나는 두 번째 SELECT 정책(`matches_select_linked_player`)을 두어 내 `gamePlayerID`가 좌석에 적힌 행이면 uid가 달라도 읽히며, 갱신·삭제 정책은 uid 그대로라 예전 uid의 판은 전적으로만 남고 손댈 수는 없다. 좌석의 플레이어 문자열은 클라이언트가 보내는 값이라 그대로 믿으면 남의 `gamePlayerID`를 적어 남의 전적을 늘릴 수 있으므로, 방을 만들 때(`matches_guard_players` INSERT 트리거)와 들어갈 때(`join_match`), 그리고 나중에 값이 새로 적힐 때(`matches_guard_seats`) 모두 `profiles`에 그 uid로 이어진 플레이어인지를 서버가 확인하고 아니면 거절한다. 로그인한 사용자의 게임별 승수는 값이 바뀔 때만 리더보드 `wins.yacht`·`wins.omok`·`wins.cuppong`·`wins.alkkagi`에 오르며, UI 테스트는 GameKit 로그인 창을 넘길 수 없어 `AppContainer`에 launchArguments `-noGameCenter`를 주어 인증을 건너뛴다.
 
 새 게임을 붙이는 데는 세 조각이면 된다: `Packages/GameCore`에 `Game`을 구현한 규칙 파일 하나(오목의 `Omok.swift`처럼 상태·수·승부 판정을 외부 의존성 없이 순수 함수로만 적는다), 그 게임의 화면(오목은 `App/Games/Omok/OmokScreen.swift`와 `OmokBoardView.swift`), 그리고 `AppContainer`에 그 게임을 여는 갈래 하나(`Status`에 케이스를 더하고 `resumeSavedGame`·`openSupabaseMatch`의 `GameID` 분기에 `OnlineMatch(game:mode:participants:log:transport:)`로 세션을 만들어 끼우는 함수를 오목의 `launchOmok`처럼 둔다) — 허브 타일, 전송, 전적 읽기·리더보드 제출은 그대로 재사용된다.
 

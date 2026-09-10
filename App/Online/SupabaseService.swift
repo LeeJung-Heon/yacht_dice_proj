@@ -17,6 +17,9 @@ final class SupabaseService {
     let client: SupabaseClient
     private(set) var authState: AuthState = .unknown
     private(set) var myMatches: [MatchRow] = []
+    /// `link_profile`로 이 uid에 이어 둔 gamePlayerID. 서버는 이어지지 않은 플레이어를 좌석에 적는 것을
+    /// 거부하므로, 방을 만들거나 들어갈 때 보내는 값은 로그인 여부가 아니라 이 값으로 가른다.
+    private(set) var linkedPlayer: String?
 
     static let nicknameKey = "online.nickname"
 
@@ -90,7 +93,12 @@ final class SupabaseService {
     /// `security definer` RPC에 맡긴다 — RLS의 "내 uid 행만 고친다"를 넘어 다시 이어야 하기 때문이다.
     func upsertProfile(player: String, name: String) async {
         guard uid != nil else { return }
-        _ = try? await client.rpc("link_profile", params: ["p_player": player, "p_name": name]).execute()
+        do {
+            _ = try await client.rpc("link_profile", params: ["p_player": player, "p_name": name]).execute()
+            linkedPlayer = player
+        } catch {
+            linkedPlayer = nil
+        }
     }
 
     /// 서버 `records` 뷰의 내 줄들. 게임마다 한 줄이다. 읽지 못했으면 nil — 빈 배열(정말 전적이
@@ -115,10 +123,14 @@ final class SupabaseService {
         try await client.from("matches").select().eq("id", value: id.uuidString).single().execute().value
     }
 
+    /// 지금 이 uid로 이어서 둘 수 있는 방만 준다. `matches`는 예전 uid로 둔 판도 gamePlayerID로 이어
+    /// 읽히지만(전적용 SELECT 정책) 그런 행은 갱신 정책이 막아 손댈 수 없으므로, 목록에 두면 눌러도
+    /// 아무 일이 없는 죽은 줄이 된다 — 좌석 uid가 나인 행만 고른다.
     func reloadMatches() async {
-        guard uid != nil else { return }
+        guard let uid else { return }
         let rows: [MatchRow]? = try? await client.from("matches").select()
             .neq("status", value: "finished")
+            .or("host_uid.eq.\(uid.uuidString),guest_uid.eq.\(uid.uuidString)")
             .order("updated_at", ascending: false)
             .execute().value
         myMatches = rows ?? []

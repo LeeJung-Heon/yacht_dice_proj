@@ -24,6 +24,20 @@ struct RecordsStoreTests {
         #expect(recent.map(\.game) == ["omok", "yacht", "omok", "omok"])
     }
 
+    @Test("앱을 다시 깔아 uid가 어느 좌석과도 다르지만 내 gamePlayerID가 좌석에 있으면 그 좌석으로 센다")
+    func 재설치_요약() {
+        let me = "G:9"
+        let 새_uid = UUID()
+        let row = MatchRow(id: UUID(), code: "000000", hostUid: UUID(), guestUid: UUID(),
+                           hostName: "나", guestName: "상대", log: Data("{}".utf8), eventCount: 0,
+                           status: "finished", totals: nil, game: "omok",
+                           hostPlayer: me, guestPlayer: nil, winnerSeat: 0)
+        let recent = RecordsStore.summarize(rows: [row], me: me, myUid: 새_uid)
+        #expect(recent.count == 1, "예전 uid의 판도 gamePlayerID로 내 것이어야 한다")
+        #expect(recent.first?.result == "승")
+        #expect(recent.first?.opponent == "상대")
+    }
+
     @Test("플레이어 키는 Game Center id가 uid를 이기고, 없으면 uid를 소문자로 낮춘다")
     func 플레이어_키() {
         let uid = UUID()
