@@ -17,13 +17,14 @@ final class CupPongUITests: XCTestCase {
         let status = app.staticTexts["header.status"]
         XCTAssertTrue(status.waitForExistence(timeout: 5))
         XCTAssertEqual(status.label, "내 컵 10 · 상대 컵 10")
+        // 이름 기본값이 나·상대라 첫 차례는 "나 차례"다. 던지기 전에 본다 — 공이 날아가는 0.9초와 겹치면 안 된다.
+        let turn = app.staticTexts["header.turn"]
+        XCTAssertEqual(turn.label, "나 차례")
         // 아래 중앙에서 위로 끌어 던진다
         let start = table.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95))
         let end = table.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
         start.press(forDuration: 0.05, thenDragTo: end)
-        // 공이 0.9초 날아간 뒤: 맞혔으면 상대 컵이 9가 되고, 빗나갔으면 차례가 "상대 차례"로 넘어간다(이름 기본값은 나·상대)
-        let turn = app.staticTexts["header.turn"]
-        XCTAssertEqual(turn.label, "나 차례")
+        // 공이 0.9초 날아간 뒤: 맞혔으면 상대 컵이 9가 되고, 빗나갔으면 차례가 "상대 차례"로 넘어간다
         let moved = NSPredicate { _, _ in
             status.label != "내 컵 10 · 상대 컵 10" || turn.label == "상대 차례"
         }

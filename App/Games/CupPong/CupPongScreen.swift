@@ -8,7 +8,8 @@ struct CupPongScreen: View {
     var onReturn: () -> Void = {}
     @Environment(\.theme) private var theme
     @Environment(\.scenePhase) private var scenePhase
-    @State private var dragStart: (point: CGPoint, time: Date)?
+    /// 끌기가 시작된 시각. 제스처가 준 시각을 그대로 쓰므로 조준선과 손을 뗄 때의 셈이 같다.
+    @State private var dragStart: Date?
     @State private var aim: CupPong.Landing?
     @State private var ball: (x: Int, y: Int, height: CGFloat)?
     @State private var vanishing: Int?
@@ -24,67 +25,75 @@ struct CupPongScreen: View {
     private var shooter: Int { CupPong.currentSeat(match.state) ?? (match.localSeat ?? 0) }
     private var targetCups: [Bool] { match.state.cups[1 - shooter] }
     private var mySeat: Int { match.mode.isOnline ? (match.localSeat ?? 0) : shooter }
+    /// 날아가는 공이 없고 내 차례면 던지는 자리에 공을 얹어 둔다 — 끌라고 한 그 공이 보여야 한다.
+    private var displayedBall: (x: Int, y: Int, height: CGFloat)? {
+        ball ?? (match.isLocalTurn && !isThrowing ? (x: 0, y: 0, height: 0) : nil)
+    }
 
     var body: some View {
-        ZStack {
-            WoodBackground()
-            VStack(spacing: 10) {
-                header
-                seats
-                GeometryReader { proxy in
-                    CupPongTableView(cups: targetCups, aim: aim, ball: ball, vanishing: vanishing)
-                        .gesture(dragGesture(height: proxy.size.height))
+        // 세기는 화면 높이로 잰다(테이블 칸 높이가 아니다). 200~280pt쯤 끌면 컵 자리에 떨어진다.
+        GeometryReader { screen in
+            ZStack {
+                WoodBackground()
+                VStack(spacing: 10) {
+                    header
+                    seats
+                    GeometryReader { _ in
+                        CupPongTableView(cups: targetCups, aim: aim, ball: displayedBall, vanishing: vanishing)
+                            .gesture(dragGesture(height: screen.size.height))
+                    }
+                    .padding(.horizontal, 8)
+                    actionBar
                 }
-                .padding(.horizontal, 8)
-                actionBar
-            }
-            .overlay(alignment: .top) {
-                if showDisconnected {
-                    Label("연결 끊김 — 재연결 중", systemImage: "wifi.slash").font(.caption.weight(.semibold))
-                        .padding(.horizontal, 12).padding(.vertical, 6).background(theme.ink.opacity(0.85), in: Capsule())
-                        .foregroundStyle(theme.paper).padding(.top, 118).accessibilityIdentifier("online.connection")
+                .overlay(alignment: .top) {
+                    if showDisconnected {
+                        Label("연결 끊김 — 재연결 중", systemImage: "wifi.slash").font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12).padding(.vertical, 6).background(theme.ink.opacity(0.85), in: Capsule())
+                            .foregroundStyle(theme.paper).padding(.top, 118).accessibilityIdentifier("online.connection")
+                    }
+                }
+                .overlay(alignment: .top) {
+                    if let error = match.lastTransportError {
+                        Text(error).font(.caption).padding(8).background(.red.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
+                            .foregroundStyle(.white).padding(.top, 48).accessibilityIdentifier("online.error")
+                    }
+                }
+                .overlay { if let turnBanner { TurnBanner(text: turnBanner).transition(.scale(scale: 0.9).combined(with: .opacity)) } }
+                .overlay(alignment: .top) {
+                    if let toast { ScoreToast(text: toast).padding(.top, 118).transition(.move(edge: .top).combined(with: .opacity)) }
                 }
             }
-            .overlay(alignment: .top) {
-                if let error = match.lastTransportError {
-                    Text(error).font(.caption).padding(8).background(.red.opacity(0.9), in: RoundedRectangle(cornerRadius: 8))
-                        .foregroundStyle(.white).padding(.top, 48).accessibilityIdentifier("online.error")
-                }
-            }
-            .overlay { if let turnBanner { TurnBanner(text: turnBanner).transition(.scale(scale: 0.9).combined(with: .opacity)) } }
-            .overlay(alignment: .top) {
-                if let toast { ScoreToast(text: toast).padding(.top, 118).transition(.move(edge: .top).combined(with: .opacity)) }
-            }
-        }
-        // 훅이 match를 강하게 담으면 match → onRemoteMove → match 고리가 되어, 판을 떠나도 세션이 살아남는다.
-        .task { [weak match, ball = $ball, vanishing = $vanishing] in
-            guard let match else { return }
-            match.onRemoteMove = { [weak match] shot, _ in
+            // 훅이 match를 강하게 담으면 match → onRemoteMove → match 고리가 되어, 판을 떠나도 세션이 살아남는다.
+            .task { [weak match, ball = $ball, vanishing = $vanishing] in
                 guard let match else { return }
-                await Self.animate(shot: shot, against: match.state.cups[1 - (CupPong.currentSeat(match.state) ?? 0)],
-                                   ball: ball, vanishing: vanishing)
+                match.onRemoteMove = { [weak match] shot, _ in
+                    guard let match else { return }
+                    await Self.animate(shot: shot, against: match.state.cups[1 - (CupPong.currentSeat(match.state) ?? 0)],
+                                       ball: ball, vanishing: vanishing)
+                }
             }
-        }
-        .onDisappear { match.onRemoteMove = nil }
-        .onChange(of: match.log.moves.count, initial: true) { _, _ in
-            guard match.outcome == nil, let seat = CupPong.currentSeat(match.state) else { return }
-            if let last = match.state.lastShot, last.cup != nil {
-                showBanner("한 번 더!")
-            } else {
-                // 로컬 2인은 두 좌석 다 내 것이라 "내 차례"가 아무것도 알려주지 않는다. 이름을 부른다.
-                showBanner(match.mode.isOnline && match.isLocalTurn ? "내 차례" : "\(seatNames[seat]) 차례")
+            .onDisappear { match.onRemoteMove = nil }
+            .onChange(of: match.log.moves.count, initial: true) { _, _ in
+                guard match.outcome == nil, let seat = CupPong.currentSeat(match.state) else { return }
+                if let last = match.state.lastShot, last.cup != nil {
+                    // 넣은 사람이 한 번 더 던진다. 온라인에서 상대가 넣었으면 내가 "한 번 더!"를 들을 일이 아니다.
+                    showBanner(!match.mode.isOnline || match.isLocalTurn ? "한 번 더!" : "\(seatNames[seat]) 한 번 더")
+                } else {
+                    // 로컬 2인은 두 좌석 다 내 것이라 "내 차례"가 아무것도 알려주지 않는다. 이름을 부른다.
+                    showBanner(match.mode.isOnline && match.isLocalTurn ? "내 차례" : "\(seatNames[seat]) 차례")
+                }
             }
+            .onChange(of: match.lastRemoteMove?.id) { _, _ in
+                guard let remote = match.lastRemoteMove, let last = match.state.lastShot else { return }
+                showToast(last.cup == nil ? "\(seatNames[remote.seat]): 빗나감" : "\(seatNames[remote.seat]): 컵 하나!")
+            }
+            .onChange(of: match.isConnected, initial: true) { _, connected in
+                disconnectTask?.cancel()
+                if connected { withAnimation { showDisconnected = false } }
+                else { disconnectTask = Task { try? await Task.sleep(for: .seconds(3)); guard !Task.isCancelled else { return }; withAnimation { showDisconnected = true } } }
+            }
+            .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await match.resync() } } }
         }
-        .onChange(of: match.lastRemoteMove?.id) { _, _ in
-            guard let remote = match.lastRemoteMove, let last = match.state.lastShot else { return }
-            showToast(last.cup == nil ? "\(seatNames[remote.seat]): 빗나감" : "\(seatNames[remote.seat]): 컵 하나!")
-        }
-        .onChange(of: match.isConnected, initial: true) { _, connected in
-            disconnectTask?.cancel()
-            if connected { withAnimation { showDisconnected = false } }
-            else { disconnectTask = Task { try? await Task.sleep(for: .seconds(3)); guard !Task.isCancelled else { return }; withAnimation { showDisconnected = true } } }
-        }
-        .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await match.resync() } } }
     }
 
     private var header: some View {
@@ -146,9 +155,10 @@ struct CupPongScreen: View {
         DragGesture(minimumDistance: 8)
             .onChanged { value in
                 guard match.isLocalTurn, !isThrowing else { return }
-                if dragStart == nil { dragStart = (value.startLocation, Date()) }
+                let start = dragStart ?? value.time
+                if dragStart == nil { dragStart = start }
                 let dx = value.location.x - value.startLocation.x, dy = value.startLocation.y - value.location.y
-                if let shot = CupPongGeometry.shot(dx: dx, dy: dy, duration: Date().timeIntervalSince(dragStart!.time), screenHeight: height) {
+                if let shot = CupPongGeometry.shot(dx: dx, dy: dy, duration: value.time.timeIntervalSince(start), screenHeight: height) {
                     aim = CupPong.landing(of: shot, against: targetCups)
                 } else {
                     aim = nil
@@ -158,11 +168,13 @@ struct CupPongScreen: View {
                 defer { dragStart = nil; aim = nil }
                 guard match.isLocalTurn, !isThrowing, let start = dragStart else { return }
                 let dx = value.location.x - value.startLocation.x, dy = value.startLocation.y - value.location.y
-                guard let shot = CupPongGeometry.shot(dx: dx, dy: dy, duration: Date().timeIntervalSince(start.time), screenHeight: height) else { return }
+                guard let shot = CupPongGeometry.shot(dx: dx, dy: dy, duration: value.time.timeIntervalSince(start), screenHeight: height) else { return }
+                // 잠금은 Task를 만들기 전에 건다. 그 사이에 두 번째 끌기가 들어오면 공이 둘이 된다.
+                isThrowing = true
                 Task {
-                    isThrowing = true
                     await Self.animate(shot: shot, against: targetCups, ball: $ball, vanishing: $vanishing)
-                    _ = await match.play(shot)
+                    let played = await match.play(shot)
+                    if !played { showToast("지금은 던질 수 없다") }
                     isThrowing = false
                 }
             }
@@ -174,7 +186,7 @@ struct CupPongScreen: View {
         return "\(seatNames[seat]) 승리"
     }
 
-    /// 공을 0.9초 날리고, 맞혔으면 컵을 흔들며 지운다. 내 던지기와 상대 재생이 같은 길을 쓴다.
+    /// 공을 0.9초 날리고, 맞혔으면 컵이 옅어지며 사라진다. 내 던지기와 상대 재생이 같은 길을 쓴다.
     ///
     /// 화면 상태 바인딩만 받는 정적 함수다. 훅이 뷰 값을 담으면 그 안의 `match`까지 함께 잡힌다.
     @MainActor
