@@ -28,7 +28,8 @@ final class OmokUITests: XCTestCase {
         for (x, y) in [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (2, 1), (3, 0), (3, 1), (4, 0)] { tap(app, x: x, y: y) }
         let result = app.staticTexts["omok.result"]
         XCTAssertTrue(result.waitForExistence(timeout: 5))
-        XCTAssertTrue(result.label.contains("승리"))
+        // 로컬 2인 설정은 이름을 "흑"·"백"으로 두므로 이긴 좌석까지 문구가 못 박힌다
+        XCTAssertEqual(result.label, "흑 승리")
         app.buttons["omok.back"].tap()
         XCTAssertTrue(app.buttons["menu.omok.local"].waitForExistence(timeout: 5))
     }
