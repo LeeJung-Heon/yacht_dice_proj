@@ -39,6 +39,11 @@ enum GameMode: Codable, Equatable, Sendable {
         }
     }
 
+    /// 다른 기기의 사람과 겨루는 모드인가. 결과 문구가 "승리/패배"인지 "누구 승리"인지를 가른다.
+    var isOnline: Bool {
+        if case .online = self { true } else { false }
+    }
+
     var title: String {
         switch self {
         case .solo: "혼자 연습"
