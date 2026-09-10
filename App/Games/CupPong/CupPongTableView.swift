@@ -4,6 +4,8 @@ import GameCore
 /// 나무 바닥, 초록 테이블, 중앙선, 먼 쪽의 빨간 컵, 예상 착지 점선, 날아가는 공. 상태만 받아 그린다.
 struct CupPongTableView: View {
     let cups: [Bool]
+    /// 먼 쪽 삼각형이 누구 것인지("내 컵"·"상대 컵"). 상대 차례에는 저 컵이 내 것이라 라벨이 뒤집힌다.
+    var owner: String = "상대 컵"
     var aim: CupPong.Landing?
     var ball: (x: Int, y: Int, height: CGFloat)?
     var vanishing: Int?
@@ -24,7 +26,7 @@ struct CupPongTableView: View {
         }
         .accessibilityElement()
         .accessibilityIdentifier("cuppong.table")
-        .accessibilityLabel("컵 \(cups.filter { $0 }.count)개 남음")
+        .accessibilityLabel("\(owner) \(cups.filter { $0 }.count)개 남음")
     }
 
     private func drawTable(_ context: GraphicsContext, _ size: CGSize) {
