@@ -5,6 +5,8 @@ import Supabase
 /// Supabase 방 코드 방식이다. Game Center 코드는 유료 계정을 만든 뒤 쓰도록 남겨 두었다.
 struct OnlineMenu: View {
     let container: AppContainer
+    /// 이 화면이 만들고 여는 게임. 방을 만들 때 서버 `matches.game`에 그대로 간다.
+    let game: GameID
 
     @Environment(\.theme) private var theme
     @State private var nickname = ""
@@ -48,7 +50,7 @@ struct OnlineMenu: View {
                 entryOverlay(entryStatus)
             }
         }
-        .navigationTitle("온라인 대전")
+        .navigationTitle("온라인 대전 · \(game.title)")
         .toolbarBackground(.hidden, for: .navigationBar)
         .task {
             nickname = service.nickname
@@ -176,6 +178,8 @@ struct OnlineMenu: View {
                         open(row)
                     } label: {
                         HStack {
+                            Text(GameID(rawValue: row.game)?.title ?? row.game)
+                                .font(.caption).foregroundStyle(theme.inkSecondary)
                             Text(opponentName(of: row)).foregroundStyle(theme.ink)
                             Spacer()
                             Text(row.isAbandoned ? "상대가 떠남" : isMyTurn(row) ? "내 차례" : "상대 차례")
@@ -224,7 +228,8 @@ struct OnlineMenu: View {
         defer { busy = false }
         message = nil
         do {
-            let room = try await service.createRoom(name: trimmedName)
+            let room = try await service.createRoom(name: trimmedName, game: game.rawValue,
+                                                    player: container.gameCenter.playerID)
             waitingRoom = room
             waitForGuest(room)
         } catch {
@@ -294,7 +299,8 @@ struct OnlineMenu: View {
         message = nil
         entryStatus = "입장 중…"
         do {
-            let row = try await service.joinRoom(code: codeInput, name: trimmedName)
+            let row = try await service.joinRoom(code: codeInput, name: trimmedName,
+                                                player: container.gameCenter.playerID)
             await enterGame(row, announcing: "\(row.hostName)의 방에 들어왔다 — 게임을 시작한다")
         } catch {
             entryStatus = nil

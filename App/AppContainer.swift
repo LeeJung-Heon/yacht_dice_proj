@@ -1,4 +1,5 @@
 import Foundation
+import GameCore
 import Observation
 import YachtCore
 
@@ -7,8 +8,10 @@ import YachtCore
 @Observable
 final class AppContainer {
     enum Status {
-        case menu
+        case hub
+        case menu(GameID)
         case playing(GameSession)
+        case playingOmok(OnlineMatch<Omok>)
         case failed(String)
     }
 
@@ -34,15 +37,21 @@ final class AppContainer {
         }
         do {
             stage = DiceStage(library: try TrajectoryLibrary.bundled())
-            status = .menu
+            status = .hub
         } catch {
             stage = nil
             status = .failed("주사위 데이터를 읽지 못했습니다: \(error)")
         }
         savedRecord = store.load()
         PushRegistration.shared.currentMatchID = { [weak self] in
-            guard let self, case .playing(let session) = self.status,
-                  case .online(let id) = session.record.mode else { return nil }
+            guard let self else { return nil }
+            let mode: GameMode
+            switch self.status {
+            case .playing(let session): mode = session.record.mode
+            case .playingOmok(let match): mode = match.mode
+            default: return nil
+            }
+            guard case .online(let id) = mode else { return nil }
             return UUID(uuidString: id)
         }
         PushRegistration.shared.onOpenMatch = { [weak self] id in
@@ -50,9 +59,31 @@ final class AppContainer {
         }
     }
 
+    /// 지금 보고 있는 게임. 허브에 있거나 열 수 없는 상태면 nil.
+    var currentGame: GameID? {
+        switch status {
+        case .menu(let game): game
+        case .playing: .yacht
+        case .playingOmok: .omok
+        default: nil
+        }
+    }
+
+    /// 허브에서 게임 하나를 고른다.
+    func showMenu(_ game: GameID) {
+        savedRecord = store.load()
+        status = .menu(game)
+    }
+
+    func returnToHub() {
+        savedRecord = store.load()
+        status = .hub
+    }
+
     /// 푸시 알림을 탭했을 때. 행을 읽어 연다. 이미 그 판을 플레이 중이면 세션을 새로 만들지 않는다.
     func openOnlineMatchID(_ id: UUID) async {
         if case .playing(let session) = status, session.record.mode == .online(matchID: id.uuidString) { return }
+        if case .playingOmok(let match) = status, match.mode == .online(matchID: id.uuidString) { return }
         await supabase.signIn()
         guard let row = try? await supabase.fetchMatch(id: id) else {
             onlineError = "매치를 읽지 못했다"
@@ -67,15 +98,47 @@ final class AppContainer {
         launch(MatchRecord(mode: mode))
     }
 
+    /// 저장된 판을 이어한다. v3부터 저장 파일이 요트 아닌 게임의 기록일 수 있어 게임별로 가른다.
     func resumeSavedGame() {
-        // v3부터 저장 파일이 요트 아닌 게임의 기록일 수 있다. GameSession은 요트 전용이라 여기서 거른다.
-        guard let record = savedRecord ?? store.load(), record.isYacht else { return }
-        launch(record)
+        guard let record = savedRecord ?? store.load() else { return }
+        switch GameID(rawValue: record.game) {
+        case .yacht: launch(record)
+        case .omok: launchOmok(record, transport: nil)
+        default: return
+        }
     }
 
     func returnToMenu() {
         savedRecord = store.load()
-        status = .menu
+        status = .menu(currentGame ?? .yacht)
+    }
+
+    /// 한 기기에서 번갈아 두는 오목. 저장된 판은 새 판에 밀린다.
+    func startOmokLocal(names: [String]) {
+        try? store.clear()
+        savedRecord = nil
+        let participants: [Participant] = names.map { .human(name: $0) }
+        let record = MatchRecord(game: Omok.id, mode: .passAndPlay(names: names), participants: participants,
+                                 moveLog: (try? MoveLog<Omok>().encoded()) ?? Data())
+        launchOmok(record, transport: nil)
+    }
+
+    private func launchOmok(_ record: MatchRecord, transport: (any TurnTransport)?) {
+        guard let data = record.moveLog, let log = try? MoveLog<Omok>.decoded(from: data) else {
+            onlineError = "오목 기록을 읽을 수 없다"
+            return
+        }
+        let match = OnlineMatch(game: Omok.self, mode: record.mode, participants: record.participants, log: log, transport: transport)
+        if transport == nil {
+            let store = store
+            var saved = record
+            match.onLogChanged = { data in
+                if let data { saved.moveLog = data; try? store.save(saved) } else { try? store.clear() }
+            }
+        } else {
+            match.startListening()
+        }
+        status = .playingOmok(match)
     }
 
     /// Supabase 행으로 게임을 연다. 게스트가 아직 없는 대기 방은 열지 않는다.
@@ -85,14 +148,30 @@ final class AppContainer {
             onlineError = "로그인되지 않았다"
             return false
         }
-        guard row.guestUid != nil else {
-            onlineError = "상대가 아직 들어오지 않았다"
+        return openSupabaseMatch(row, localUid: uid,
+                                 transport: SupabaseTurnTransport(client: supabase.client, matchID: row.id))
+    }
+
+    /// 테스트가 전송을 바꿔 끼울 수 있는 핵심. `row.game`으로 요트와 오목을 가른다.
+    @discardableResult
+    func openSupabaseMatch(_ row: MatchRow, localUid: UUID, transport: any TurnTransport) -> Bool {
+        guard row.guestUid != nil else { onlineError = "상대가 아직 들어오지 않았다"; return false }
+        switch GameID(rawValue: row.game) {
+        case .yacht:
+            return openOnlineMatch(matchID: row.id.uuidString, localID: localUid.uuidString,
+                                   players: row.seats(localUid: localUid), matchData: row.log, transport: transport)
+        case .omok:
+            if case .playingOmok(let match) = status, match.mode == .online(matchID: row.id.uuidString) { return true }
+            let participants = seatParticipants(localID: localUid.uuidString, players: row.seats(localUid: localUid))
+            guard participants.contains(where: \.isHuman) else { onlineError = "이 매치에 내 자리가 없습니다"; return false }
+            onlineError = nil
+            launchOmok(MatchRecord(game: Omok.id, mode: .online(matchID: row.id.uuidString), participants: participants, moveLog: row.log),
+                       transport: transport)
+            return true
+        default:
+            onlineError = "아직 지원하지 않는 게임이다: \(row.game)"
             return false
         }
-        let data = row.log
-        return openOnlineMatch(matchID: row.id.uuidString, localID: uid.uuidString,
-                               players: row.seats(localUid: uid), matchData: data,
-                               transport: SupabaseTurnTransport(client: supabase.client, matchID: row.id))
     }
 
     /// GameKit 객체 없이 테스트할 수 있는 핵심. 성공하면 참.

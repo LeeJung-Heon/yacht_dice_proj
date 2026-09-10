@@ -10,7 +10,6 @@ struct MenuScreen: View {
     @State private var localNames = ["플레이어 1", "플레이어 2", "플레이어 3", "플레이어 4"]
     @State private var showingBotPicker = false
     @State private var showingLocalSetup = false
-    @State private var showingSettings = false
     @State private var showingOnline = false
 
     var body: some View {
@@ -70,18 +69,17 @@ struct MenuScreen: View {
                 }
             }
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showingSettings = true } label: {
-                        Image(systemName: "gearshape").foregroundStyle(theme.ivory)
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { container.returnToHub() } label: {
+                        Image(systemName: "chevron.left").foregroundStyle(theme.ivory)
                     }
-                    .accessibilityIdentifier("menu.settings")
-                    .accessibilityLabel("설정")
+                    .accessibilityIdentifier("menu.back")
+                    .accessibilityLabel("허브로")
                 }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
-            .navigationDestination(isPresented: $showingOnline) { OnlineMenu(container: container) }
+            .navigationDestination(isPresented: $showingOnline) { OnlineMenu(container: container, game: .yacht) }
             .sheet(isPresented: $showingLocalSetup) { localSetup }
-            .sheet(isPresented: $showingSettings) { SettingsSheet() }
         }
     }
 

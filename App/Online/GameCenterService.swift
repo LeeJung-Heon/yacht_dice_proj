@@ -17,6 +17,9 @@ final class GameCenterService: NSObject {
 
     var localPlayerID: String { GKLocalPlayer.local.gamePlayerID }
 
+    /// 방을 만들 때 서버에 남길 게임별 플레이어(예: 오목의 돌 색). Task 7이 채운다.
+    var playerID: String? { nil }
+
     func authenticate() {
         let player = GKLocalPlayer.local
         if player.isAuthenticated {

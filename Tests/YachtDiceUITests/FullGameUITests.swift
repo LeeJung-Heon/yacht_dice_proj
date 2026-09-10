@@ -12,6 +12,7 @@ final class FullGameUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-resetMatch", "-noPush"]
         app.launch()
+        app.openYachtMenu()
 
         let solo = app.buttons["menu.solo"]
         XCTAssertTrue(solo.waitForExistence(timeout: 10), "메뉴가 뜨지 않았다")
@@ -56,6 +57,7 @@ final class FullGameUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-resetMatch", "-noPush"]
         app.launch()
+        app.openYachtMenu()
 
         let solo = app.buttons["menu.solo"]
         XCTAssertTrue(solo.waitForExistence(timeout: 10), "메뉴가 뜨지 않았다")
@@ -75,6 +77,7 @@ final class FullGameUITests: XCTestCase {
         app.terminate()
         let relaunched = XCUIApplication()
         relaunched.launch()   // -resetMatch 없이
+        relaunched.openYachtMenu()
 
         let resume = relaunched.buttons["menu.resume"]
         XCTAssertTrue(resume.waitForExistence(timeout: 10), "이어하기가 뜨지 않았다")
@@ -83,6 +86,16 @@ final class FullGameUITests: XCTestCase {
         let header = relaunched.otherElements["header.turn"]
         XCTAssertTrue(header.waitForExistence(timeout: 15))
         XCTAssertEqual(header.label, headerBefore, "재시작 후 턴이 복원되지 않았다")
+    }
+}
+
+extension XCUIApplication {
+    /// 허브에서 요트 다이스 메뉴로 들어간다.
+    @MainActor
+    func openYachtMenu() {
+        let tile = buttons["hub.yacht"]
+        XCTAssertTrue(tile.waitForExistence(timeout: 10), "허브에 요트 타일이 없다")
+        tile.tap()
     }
 }
 

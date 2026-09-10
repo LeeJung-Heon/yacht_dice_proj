@@ -9,6 +9,7 @@ final class MenuUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-resetMatch", "-noPush"]
         app.launch()
+        app.openYachtMenu()
 
         let bot = app.buttons["menu.bot"]
         XCTAssertTrue(bot.waitForExistence(timeout: 10))
@@ -40,6 +41,7 @@ final class MenuUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-resetMatch", "-noPush"]
         app.launch()
+        app.openYachtMenu()
 
         let local = app.buttons["menu.local"]
         XCTAssertTrue(local.waitForExistence(timeout: 10))
@@ -66,6 +68,7 @@ final class MenuUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-resetMatch", "-noPush"]
         app.launch()
+        app.openYachtMenu()
         let solo = app.buttons["menu.solo"]
         XCTAssertTrue(solo.waitForExistence(timeout: 10))
         solo.tap()
@@ -76,6 +79,23 @@ final class MenuUITests: XCTestCase {
         app.buttons["header.menu"].tap()
         XCTAssertTrue(app.buttons["menu.resume"].waitForExistence(timeout: 5), "이어하기가 없다")
     }
+
+    @MainActor
+    func test_허브에서_오목_메뉴가_열리고_돌아온다() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetMatch", "-noPush"]
+        app.launch()
+        let omok = app.buttons["hub.omok"]
+        XCTAssertTrue(omok.waitForExistence(timeout: 10))
+        omok.tap()
+        XCTAssertTrue(app.buttons["menu.omok.local"].waitForExistence(timeout: 5))
+        app.buttons["menu.back"].tap()
+        XCTAssertTrue(app.buttons["hub.yacht"].waitForExistence(timeout: 5))
+        // 준비 중인 게임은 허브에 보이되 눌리지 않는다
+        let cuppong = app.buttons["hub.cuppong"]
+        XCTAssertTrue(cuppong.waitForExistence(timeout: 5))
+        XCTAssertFalse(cuppong.isEnabled, "준비 중 타일이 눌린다")
+    }
 }
 
 extension MenuUITests {
@@ -84,6 +104,7 @@ extension MenuUITests {
         let app = XCUIApplication()
         app.launchArguments = ["-resetMatch", "-noPush"]
         app.launch()
+        app.openYachtMenu()
         let online = app.buttons["menu.online"]
         XCTAssertTrue(online.waitForExistence(timeout: 10))
         online.tap()

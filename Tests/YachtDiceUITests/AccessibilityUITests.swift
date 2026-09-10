@@ -14,6 +14,7 @@ final class AccessibilityUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-resetMatch", "-noPush"]
         app.launch()
+        app.openYachtMenu()
 
         let solo = app.buttons["menu.solo"]
         XCTAssertTrue(solo.waitForExistence(timeout: 10), "메뉴가 뜨지 않았다")
