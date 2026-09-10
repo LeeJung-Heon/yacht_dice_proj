@@ -25,6 +25,8 @@ struct MatchRow: Codable, Equatable, Sendable {
     var guestPlayer: String?
     /// 끝났을 때의 승자 좌석. 무승부나 진행 중이면 nil.
     var winnerSeat: Int?
+    /// 서버가 마지막으로 이 행을 고친 때. 최근 매치 목록의 순서와 날짜에 쓴다.
+    var updatedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id, code, log, status, totals, game
@@ -35,15 +37,18 @@ struct MatchRow: Codable, Equatable, Sendable {
         case turnSeat = "turn_seat"
         case hostPlayer = "host_player", guestPlayer = "guest_player"
         case winnerSeat = "winner_seat"
+        case updatedAt = "updated_at"
     }
 
     init(id: UUID, code: String, hostUid: UUID, guestUid: UUID?, hostName: String, guestName: String?,
          log: Data, eventCount: Int, status: String, totals: [Int]?, hints: [ThrowHint] = [], turnSeat: Int? = nil,
-         game: String = "yacht", hostPlayer: String? = nil, guestPlayer: String? = nil, winnerSeat: Int? = nil) {
+         game: String = "yacht", hostPlayer: String? = nil, guestPlayer: String? = nil, winnerSeat: Int? = nil,
+         updatedAt: Date? = nil) {
         self.id = id; self.code = code; self.hostUid = hostUid; self.guestUid = guestUid
         self.hostName = hostName; self.guestName = guestName; self.log = log; self.eventCount = eventCount
         self.status = status; self.totals = totals; self.hints = hints; self.turnSeat = turnSeat
         self.game = game; self.hostPlayer = hostPlayer; self.guestPlayer = guestPlayer; self.winnerSeat = winnerSeat
+        self.updatedAt = updatedAt
     }
 
     init(from decoder: any Decoder) throws {
@@ -66,6 +71,23 @@ struct MatchRow: Codable, Equatable, Sendable {
         hostPlayer = try c.decodeIfPresent(String.self, forKey: .hostPlayer)
         guestPlayer = try c.decodeIfPresent(String.self, forKey: .guestPlayer)
         winnerSeat = try c.decodeIfPresent(Int.self, forKey: .winnerSeat)
+        // 이 디코더의 dateDecodingStrategy는 Supabase SDK가 정하므로 문자열로 받아 직접 푼다.
+        updatedAt = (try c.decodeIfPresent(String.self, forKey: .updatedAt)).flatMap(Self.date(fromISO8601:))
+    }
+
+    /// Supabase는 `2026-09-10T01:02:03.456789+00:00`처럼 소수 초까지 준다. 없는 형태도 받아 준다.
+    private static func date(fromISO8601 text: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: text) { return date }
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: text)
+    }
+
+    private static func iso8601(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -86,6 +108,7 @@ struct MatchRow: Codable, Equatable, Sendable {
         try container.encode(hostPlayer, forKey: .hostPlayer)
         try container.encode(guestPlayer, forKey: .guestPlayer)
         try container.encode(winnerSeat, forKey: .winnerSeat)
+        try container.encode(updatedAt.map(Self.iso8601), forKey: .updatedAt)
     }
 
     var isWaiting: Bool { status == "waiting" }

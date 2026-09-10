@@ -18,7 +18,7 @@ final class OmokUITests: XCTestCase {
     @MainActor
     func test_로컬_2인_다섯_수로_흑이_이긴다() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetMatch", "-noPush"]
+        app.launchArguments = ["-resetMatch", "-noPush", "-noGameCenter"]
         app.launch()
         app.buttons["hub.omok"].tap()
         app.buttons["menu.omok.local"].tap()

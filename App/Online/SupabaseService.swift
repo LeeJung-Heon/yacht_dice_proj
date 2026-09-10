@@ -85,6 +85,25 @@ final class SupabaseService {
         return row
     }
 
+    /// Game Center 로그인 뒤 gamePlayerID ↔ 내 uid를 잇는다.
+    /// 앱을 지웠다 깔면 익명 uid가 바뀌어 예전 행의 주인이 아니게 되므로, 직접 upsert하지 않고
+    /// `security definer` RPC에 맡긴다 — RLS의 "내 uid 행만 고친다"를 넘어 다시 이어야 하기 때문이다.
+    func upsertProfile(player: String, name: String) async {
+        guard uid != nil else { return }
+        _ = try? await client.rpc("link_profile", params: ["p_player": player, "p_name": name]).execute()
+    }
+
+    /// 서버 `records` 뷰의 내 줄들. 게임마다 한 줄이다.
+    func fetchRecords(player: String) async -> [RecordRow] {
+        (try? await client.from("records").select().eq("player", value: player).execute().value) ?? []
+    }
+
+    /// 끝난 내 매치를 최근 순으로. RLS가 내가 낀 행만 보여준다.
+    func fetchFinished(limit: Int = 10) async -> [MatchRow] {
+        (try? await client.from("matches").select().eq("status", value: "finished")
+            .order("updated_at", ascending: false).limit(limit).execute().value) ?? []
+    }
+
     /// 대기 방 취소나 끝난 판 정리. 참가자만 지울 수 있다(RLS).
     func deleteMatch(id: UUID) async throws {
         try await client.from("matches").delete().eq("id", value: id.uuidString).execute()

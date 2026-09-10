@@ -21,8 +21,11 @@ final class AppContainer {
 
     private let store: MatchStore
     private let stage: DiceStage?
-    let gameCenter = GameCenterService()
-    let supabase = SupabaseService()
+    let gameCenter: GameCenterService
+    let supabase: SupabaseService
+    let records: RecordsStore
+    /// UI 테스트는 GameKit 로그인 창이 뜨면 진행하지 못한다. `-noGameCenter`면 인증을 건너뛴다.
+    private let skipGameCenter: Bool
     /// 온라인 매치를 열지 못한 이유. 온라인 메뉴가 보여준다.
     private(set) var onlineError: String?
 
@@ -31,6 +34,12 @@ final class AppContainer {
     init(store: MatchStore = .default,
          arguments: [String] = ProcessInfo.processInfo.arguments) {
         self.store = store
+        let gameCenter = GameCenterService()
+        let supabase = SupabaseService()
+        self.gameCenter = gameCenter
+        self.supabase = supabase
+        self.records = RecordsStore(service: supabase, gameCenter: gameCenter)
+        self.skipGameCenter = arguments.contains("-noGameCenter")
         // UI 테스트가 깨끗한 상태에서 시작할 수 있게 한다
         if arguments.contains("-resetMatch") {
             try? store.clear()
@@ -57,6 +66,18 @@ final class AppContainer {
         PushRegistration.shared.onOpenMatch = { [weak self] id in
             Task { await self?.openOnlineMatchID(id) }
         }
+    }
+
+    /// 앱이 뜰 때 한 번. 서버에 로그인하고 Game Center 신원을 잇고 전적을 읽는다.
+    /// Game Center 로그인은 선택이라 실패해도 나머지는 그대로 돈다.
+    func bootstrap() async {
+        await supabase.signIn()
+        if !skipGameCenter { await gameCenter.authenticate() }
+        if let id = gameCenter.playerID, let name = gameCenter.displayName {
+            await supabase.upsertProfile(player: id, name: name)
+            if supabase.nickname.isEmpty { supabase.nickname = name }
+        }
+        await records.reload()
     }
 
     /// 지금 보고 있는 게임. 허브에 있거나 열 수 없는 상태면 nil.
@@ -131,6 +152,7 @@ final class AppContainer {
             return false
         }
         let match = OnlineMatch(game: Omok.self, mode: record.mode, participants: record.participants, log: log, transport: transport)
+        match.onFinished = { [weak self] in Task { await self?.records.reload() } }
         if transport == nil {
             let store = store
             var saved = record
@@ -212,6 +234,7 @@ final class AppContainer {
         guard let stage else { return }
         stage.reset()
         let session = GameSession(driver: LocalDriver(), stage: stage, record: record, transport: transport)
+        session.onFinished = { [weak self] in Task { await self?.records.reload() } }
         if transport == nil {
             let store = store
             session.onLogChanged = { record in try? store.save(record) }

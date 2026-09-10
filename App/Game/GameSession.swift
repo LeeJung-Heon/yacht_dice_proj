@@ -39,6 +39,9 @@ final class GameSession {
     var onHoldToggled: (@MainActor () -> Void)?
     /// 기록했다: 카테고리, 점수, 이번 기록으로 상단 보너스를 달성했는가.
     var onCommitted: (@MainActor (ScoreCategory, Int, Bool) -> Void)?
+    /// 판이 끝났다. 한 판에 한 번만 부른다 — 컨테이너가 전적을 다시 읽는다.
+    var onFinished: (@MainActor () -> Void)?
+    private var didNotifyFinished = false
 
     private var botTask: Task<Void, Never>?
 
@@ -184,6 +187,7 @@ final class GameSession {
         nextThrowDirection = nil
         pendingHandoff = false
         throwHints = []
+        didNotifyFinished = false
         stage.reset()
         onLogChanged?(record)
         scheduleTurnOwner(announceHandoff: false)
@@ -240,6 +244,14 @@ final class GameSession {
             }
             await publishTurnIfNeeded()
         }
+        notifyFinishedIfNeeded()
+    }
+
+    /// 판이 끝났다고 한 번만 알린다. 서버에 결과를 올린 뒤에 부른다.
+    private func notifyFinishedIfNeeded() {
+        guard visibleState.phase == .finished, !didNotifyFinished else { return }
+        didNotifyFinished = true
+        onFinished?()
     }
 
     /// 앱이 앞으로 돌아왔을 때 등, 서버 상태를 즉시 다시 읽는다.
@@ -357,6 +369,7 @@ final class GameSession {
         lastTransportError = nil
         scheduleTurnOwner(announceHandoff: false)
         onLogChanged?(record)
+        notifyFinishedIfNeeded()
     }
 
     /// 새 차례의 주인에 따라 다음 일을 정한다.

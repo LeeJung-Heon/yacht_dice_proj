@@ -10,7 +10,7 @@ final class FullGameUITests: XCTestCase {
     @MainActor
     func test_12턴을_완주한다() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetMatch", "-noPush"]
+        app.launchArguments = ["-resetMatch", "-noPush", "-noGameCenter"]
         app.launch()
         app.openYachtMenu()
 
@@ -55,7 +55,7 @@ final class FullGameUITests: XCTestCase {
     @MainActor
     func test_재시작_후_진행이_복원된다() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetMatch", "-noPush"]
+        app.launchArguments = ["-resetMatch", "-noPush", "-noGameCenter"]
         app.launch()
         app.openYachtMenu()
 

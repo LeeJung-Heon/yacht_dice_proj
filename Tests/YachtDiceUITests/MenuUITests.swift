@@ -7,7 +7,7 @@ final class MenuUITests: XCTestCase {
     @MainActor
     func test_컴퓨터_대전_한_턴() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetMatch", "-noPush"]
+        app.launchArguments = ["-resetMatch", "-noPush", "-noGameCenter"]
         app.launch()
         app.openYachtMenu()
 
@@ -39,7 +39,7 @@ final class MenuUITests: XCTestCase {
     @MainActor
     func test_로컬_2인_핸드오프() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetMatch", "-noPush"]
+        app.launchArguments = ["-resetMatch", "-noPush", "-noGameCenter"]
         app.launch()
         app.openYachtMenu()
 
@@ -66,7 +66,7 @@ final class MenuUITests: XCTestCase {
     @MainActor
     func test_메뉴로_돌아가면_이어하기가_있다() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetMatch", "-noPush"]
+        app.launchArguments = ["-resetMatch", "-noPush", "-noGameCenter"]
         app.launch()
         app.openYachtMenu()
         let solo = app.buttons["menu.solo"]
@@ -83,7 +83,7 @@ final class MenuUITests: XCTestCase {
     @MainActor
     func test_허브에서_오목_메뉴가_열리고_돌아온다() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetMatch", "-noPush"]
+        app.launchArguments = ["-resetMatch", "-noPush", "-noGameCenter"]
         app.launch()
         let omok = app.buttons["hub.omok"]
         XCTAssertTrue(omok.waitForExistence(timeout: 10))
@@ -102,7 +102,7 @@ extension MenuUITests {
     @MainActor
     func test_온라인_대전_화면이_열린다() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetMatch", "-noPush"]
+        app.launchArguments = ["-resetMatch", "-noPush", "-noGameCenter"]
         app.launch()
         app.openYachtMenu()
         let online = app.buttons["menu.online"]
@@ -117,7 +117,7 @@ extension MenuUITests {
     @MainActor
     func test_설정_시트가_열린다() {
         let app = XCUIApplication()
-        app.launchArguments = ["-resetMatch", "-noPush"]
+        app.launchArguments = ["-resetMatch", "-noPush", "-noGameCenter"]
         app.launch()
         let settings = app.buttons["menu.settings"]
         XCTAssertTrue(settings.waitForExistence(timeout: 10))

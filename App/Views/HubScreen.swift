@@ -48,6 +48,8 @@ struct HubScreen: View {
                     .padding(.horizontal, 16).padding(.bottom, 24)
                 }
             }
+            .task { await container.bootstrap() }
+            .navigationDestination(for: RecordsRoute.self) { _ in RecordsScreen(container: container) }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showingSettings = true } label: { Image(systemName: "gearshape").foregroundStyle(theme.ivory) }
@@ -60,14 +62,93 @@ struct HubScreen: View {
     }
 }
 
-/// 자리 표시자. 전적을 모으고 보여주는 일은 Task 7이 채운다.
+/// 허브의 "전체 보기"가 미는 목적지. 값 하나뿐이라 빈 구조체다.
+struct RecordsRoute: Hashable {}
+
+/// 게임별 승·패·무와 최근 세 판. 전체는 `RecordsScreen`이 보여준다.
 struct RecordsCard: View {
     let container: AppContainer
+    @Environment(\.theme) private var theme
+
+    private var records: [RecordRow] { container.records.records }
+    private var recent: [RecentMatch] { container.records.recent }
 
     var body: some View {
-        Text("전적은 곧 보인다")
-            .font(.caption)
-            .paperCard(padding: 14)
-            .accessibilityIdentifier("hub.records")
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("전적").font(.system(.headline, design: .serif)).foregroundStyle(theme.ink)
+                Spacer()
+                NavigationLink(value: RecordsRoute()) {
+                    Text("전체 보기").font(.caption.weight(.semibold)).foregroundStyle(theme.brass)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("hub.records.all")
+            }
+
+            if records.isEmpty {
+                Text("아직 전적이 없다").font(.callout).foregroundStyle(theme.inkSecondary)
+            } else {
+                ForEach(records, id: \.game) { row in
+                    HStack {
+                        Text(GameID(rawValue: row.game)?.title ?? row.game).foregroundStyle(theme.ink)
+                        Spacer()
+                        Text("승 \(row.wins) · 패 \(row.losses) · 무 \(row.draws)")
+                            .font(.callout.monospacedDigit()).foregroundStyle(theme.inkSecondary)
+                    }
+                }
+            }
+
+            if !recent.isEmpty {
+                Divider().overlay(theme.paperLine)
+                ForEach(recent.prefix(3), id: \.id) { match in
+                    RecentRow(match: match)
+                }
+            }
+
+            gameCenterLine
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .paperCard(padding: 14)
+        .accessibilityIdentifier("hub.records")
+    }
+
+    @ViewBuilder
+    private var gameCenterLine: some View {
+        switch container.gameCenter.authState {
+        case .authenticated(_, let name):
+            Label("Game Center · \(name)", systemImage: "person.crop.circle")
+                .font(.caption).foregroundStyle(theme.inkSecondary)
+        case .unavailable:
+            Text("Game Center 미로그인 — 전적은 이 기기에만 남는다")
+                .font(.caption).foregroundStyle(theme.inkSecondary)
+        case .unknown:
+            EmptyView()
+        }
+    }
+}
+
+/// 최근 매치 한 줄: 게임 · 상대 · 결과. 전적 화면은 끝난 날짜까지 보여준다.
+struct RecentRow: View {
+    let match: RecentMatch
+    var showsDate = false
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(GameID(rawValue: match.game)?.title ?? match.game)
+                .font(.caption).foregroundStyle(theme.inkSecondary)
+            Text(match.opponent).foregroundStyle(theme.ink).lineLimit(1)
+            if showsDate, let finishedAt = match.finishedAt {
+                Text(finishedAt.formatted(.dateTime.month().day()))
+                    .font(.caption2).foregroundStyle(theme.inkSecondary)
+            }
+            Spacer()
+            Text(match.result)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(match.result == "승" ? theme.brassInk : theme.inkSecondary)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Capsule().fill(match.result == "승" ? theme.brass : theme.paperLine))
+        }
+        .accessibilityElement(children: .combine)
     }
 }

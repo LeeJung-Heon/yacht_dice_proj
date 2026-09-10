@@ -31,6 +31,9 @@ final class OnlineMatch<G: Game> {
     var onRemoteMove: (@MainActor (G.Move, ThrowHint?) async -> Void)?
     /// 로그가 바뀌었다. 로컬 판은 저장하고, 끝났으면 nil을 준다.
     var onLogChanged: (@MainActor (Data?) -> Void)?
+    /// 판이 끝났다. 한 판에 한 번만 부른다 — 컨테이너가 전적을 다시 읽는다.
+    var onFinished: (@MainActor () -> Void)?
+    private var didNotifyFinished = false
 
     private let transport: (any TurnTransport)?
     private var listenTask: Task<Void, Never>?
@@ -66,7 +69,15 @@ final class OnlineMatch<G: Game> {
         log.append(move)
         notifyLogChanged()
         await publish()
+        notifyFinishedIfNeeded()
         return true
+    }
+
+    /// 판이 끝났다고 한 번만 알린다. 서버에 결과를 올린 뒤에 부른다.
+    private func notifyFinishedIfNeeded() {
+        guard outcome != nil, !didNotifyFinished else { return }
+        didNotifyFinished = true
+        onFinished?()
     }
 
     func encodedLog() throws -> Data { try log.encoded() }
@@ -139,6 +150,8 @@ final class OnlineMatch<G: Game> {
         }
         isReplaying = true
         defer { isReplaying = false }
+        // 상대의 마지막 수로 판이 끝났을 수 있다. 로그를 알린 뒤에 부르려고 먼저 선언한다.
+        defer { notifyFinishedIfNeeded() }
         // 배치 일부만 받아들여도(뒤엣것이 조작이라 거부돼도) 그때까지 둔 수는 잃지 않는다.
         // isReplaying을 내리기 전에 알려야 화면이 재생 중 상태로 저장을 보므로, 이 defer를 나중에 선언해
         // "알림 → isReplaying = false" 순서를 만든다(defer는 선언의 역순으로 실행된다).
