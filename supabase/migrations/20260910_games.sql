@@ -40,6 +40,8 @@ begin
   return m;
 end;
 $$;
+revoke execute on function public.join_match(text, text, text) from public, anon;
+grant execute on function public.join_match(text, text, text) to authenticated;
 
 -- 좌석·게임·플레이어는 고정이고 끝난 판은 바뀌지 않는다
 create or replace function public.matches_guard_seats()
