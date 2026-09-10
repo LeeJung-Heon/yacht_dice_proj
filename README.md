@@ -44,7 +44,7 @@ SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
 | `App/Views` | 시작 메뉴, 참가자 띠, 점수판, 액션 바, 결과 카드 등 세로 화면 UI. |
 | `App/Design` | 라이트/다크 테마 토큰과 대비 검사, 종이·가죽·나무 표면, 주사위 면 뷰, 메뉴 카드. |
 | `App/Feedback` | 햅틱 매핑, 외부 파일 없는 합성 효과음, 세션 콜백을 잇는 `FeedbackCoordinator`, 설정 키. |
-| `App/Online` | `TurnTransport` 프로토콜, 테스트용 메모리 전송, Supabase 서비스·전송·행 모델, 그리고 보류 중인 Game Center 어댑터로, Supabase SDK와 GameKit은 여기서만 import한다. |
+| `App/Online` | `TurnTransport` 프로토콜, 테스트용 메모리 전송, Supabase 서비스·전송·행 모델, 그리고 Game Center 신원·리더보드 서비스와 전적 저장소로, Supabase SDK와 GameKit은 여기서만 import한다. |
 | `App/AppContainer.swift` | 앱 조립, 메뉴 상태, 저장된 판 복원, 온라인 매치 열기. |
 | `Tools/TrajectoryBaker` | 물리 시뮬로 궤적을 굽는 macOS 앱으로, 결과는 `App/Resources/trajectories.bin`에 들어간다. |
 | `docs/superpowers` | 설계 스펙과 구현 계획. |
@@ -106,7 +106,7 @@ Game Center 엔타이틀먼트(`App/YachtDice.entitlements`)는 `project.yml`에
 
 ## 온라인 대전
 
-온라인 대전은 Supabase 무료 티어(프로젝트 `yacht-dice`, 서울)로 동작하며, 기기마다 익명 로그인으로 계정 하나를 받고 6자리 방 코드로 상대와 만나며, 한 판은 `public.matches` 행 하나다. 행은 어떤 게임인지를 `game` 열로, 호스트·게스트가 고른 게임별 플레이어(오목은 아직 안 쓰지만 자리는 있다)를 `host_player`·`guest_player` 열로, 끝났을 때의 승자 좌석을 `winner_seat` 열로 갖고, 매치 데이터는 게임마다 다른 모양의 JSON을 그대로 나른다 — 요트는 `MatchLog`, 그 외는 `GameCore`의 `MoveLog<G>`다. 굴림·고정·기록 이벤트가 생길 때마다 행을 갱신하면 DB 트리거 `matches_broadcast`가 `realtime.broadcast_changes`로 비공개 채널 `match:<id>`에 행 전체를 쏘고, 상대는 그 채널을 세션 토큰으로 구독해 새 이벤트만 `GameState.canApply`(요트) 또는 게임별 `Game.canApply`(그 외)로 검증한 뒤 재생하므로 기록부터 상대의 내 차례까지 0.1초 안팎이 걸리며, 소켓이 끊긴 사이의 변경은 3초 폴링이 같은 행을 읽어 채우고 앱이 앞으로 돌아오면 한 번 더 읽는다. 굴린 쪽은 궤적 ID·방향·회전 선택을 `throws` 열에 이벤트 번호와 함께 적어 두고 받는 쪽은 같은 값으로 재생하므로 두 화면이 같은 던지기를 보며, 같은 채널의 Presence로 상대의 접속을 명패의 점으로, 채널 상태로 연결 끊김을 띠로 보여 준다. 규칙 위반은 막지만 주사위는 각 클라이언트가 굴려 조작된 클라이언트의 "운 좋은 눈"은 막지 못하고(스펙 P2/P3 §7.4), 서버 쪽 RLS는 참가자만 행을 읽고 갱신하게 하며 `realtime.messages` 정책이 참가자만 그 토픽을 받게 하고, 방 입장은 `join_match` 함수가 대기 중인 빈 자리에만 넣으며, 좌석·게임·플레이어는 한 번 정해지면 트리거가 바꾸지 못하게 막고 끝난 매치는 아예 더 못 고치며, 3일 넘게 멈춘 판은 `pg_cron`이 10분마다 `abandoned`로 바꿔 목록에 "상대가 떠남"으로 보인다.
+온라인 대전은 Supabase 무료 티어(프로젝트 `yacht-dice`, 서울)로 동작하며, 기기마다 익명 로그인으로 계정 하나를 받고 6자리 방 코드로 상대와 만나며, 한 판은 `public.matches` 행 하나다. 행은 어떤 게임인지를 `game` 열로, 호스트·게스트의 Game Center `gamePlayerID`(미로그인이면 null)를 `host_player`·`guest_player` 열로, 끝났을 때의 승자 좌석을 `winner_seat` 열로 갖고, 매치 데이터는 게임마다 다른 모양의 JSON을 그대로 나른다 — 요트는 `MatchLog`, 그 외는 `GameCore`의 `MoveLog<G>`다. 굴림·고정·기록 이벤트가 생길 때마다 행을 갱신하면 DB 트리거 `matches_broadcast`가 `realtime.broadcast_changes`로 비공개 채널 `match:<id>`에 행 전체를 쏘고, 상대는 그 채널을 세션 토큰으로 구독해 새 이벤트만 `GameState.canApply`(요트) 또는 게임별 `Game.canApply`(그 외)로 검증한 뒤 재생하므로 기록부터 상대의 내 차례까지 0.1초 안팎이 걸리며, 소켓이 끊긴 사이의 변경은 3초 폴링이 같은 행을 읽어 채우고 앱이 앞으로 돌아오면 한 번 더 읽는다. 굴린 쪽은 궤적 ID·방향·회전 선택을 `throws` 열에 이벤트 번호와 함께 적어 두고 받는 쪽은 같은 값으로 재생하므로 두 화면이 같은 던지기를 보며, 같은 채널의 Presence로 상대의 접속을 명패의 점으로, 채널 상태로 연결 끊김을 띠로 보여 준다. 규칙 위반은 막지만 주사위는 각 클라이언트가 굴려 조작된 클라이언트의 "운 좋은 눈"은 막지 못하고(스펙 P2/P3 §7.4), 서버 쪽 RLS는 참가자만 행을 읽고 갱신하게 하며 `realtime.messages` 정책이 참가자만 그 토픽을 받게 하고, 방 입장은 `join_match` 함수가 대기 중인 빈 자리에만 넣으며, 좌석·게임·플레이어는 한 번 정해지면 트리거가 바꾸지 못하게 막고 끝난 매치는 아예 더 못 고치며, 3일 넘게 멈춘 판은 `pg_cron`이 10분마다 `abandoned`로 바꿔 목록에 "상대가 떠남"으로 보인다.
 
 Game Center로 로그인하면 `gamePlayerID`와 그 순간의 익명 uid를 security definer RPC `link_profile`이 `profiles` 테이블(`player`, `uid`, `name`)에 이어 두므로 앱을 지웠다 다시 깔아 uid가 바뀌어도 같은 `gamePlayerID`로 전적이 이어지고, 끝난 매치는 뷰 `records`가 `matches`에서 게임·플레이어(로그인했으면 `gamePlayerID`, 아니면 uid)별 승·패·무를 집계해 앱의 전적 카드와 Game Center 리더보드 제출의 원천이 된다.
 

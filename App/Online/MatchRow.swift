@@ -20,7 +20,7 @@ struct MatchRow: Codable, Equatable, Sendable {
     var turnSeat: Int?
     /// 어떤 게임인지. `Packages/GameCore`의 `Game.id`와 같다.
     var game: String = "yacht"
-    /// 호스트·게스트가 고른 게임별 플레이어(예: 오목의 돌 색). 요트는 쓰지 않는다.
+    /// 호스트·게스트의 Game Center gamePlayerID. 미로그인이면 nil이며, 전적 연속성과 좌석 검증에 쓴다.
     var hostPlayer: String?
     var guestPlayer: String?
     /// 끝났을 때의 승자 좌석. 무승부나 진행 중이면 nil.
