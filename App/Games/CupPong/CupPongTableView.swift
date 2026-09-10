@@ -8,11 +8,16 @@ struct CupPongTableView: View {
     var ball: (x: Int, y: Int, height: CGFloat)?
     var vanishing: Int?
 
+    /// 공·조준선이 뜬 높이를 화면에서 얼마나 들어 올려 그릴지(화면 높이 비율).
+    private static let heightLift: CGFloat = 0.18
+
     var body: some View {
         Canvas { context, size in
             drawTable(context, size)
             if let aim { drawAim(context, size, aim) }
-            for i in CupPong.cupCenters.indices.reversed() where cups[i] || vanishing == i {
+            // cupCenters는 먼 쪽(인덱스 0)부터 가까운 쪽 순이다. 그 순서 그대로 그려야
+            // 가까운 컵이 먼 컵 위에 덧그려진다.
+            for i in CupPong.cupCenters.indices where cups[i] || vanishing == i {
                 drawCup(context, size, index: i, fading: vanishing == i)
             }
             if let ball { drawBall(context, size, ball) }
@@ -58,7 +63,7 @@ struct CupPongTableView: View {
         for step in 0...12 {
             let pt = CupPongGeometry.ballPath(to: aim, progress: CGFloat(step) / 12)
             var p = CupPongGeometry.project(x: pt.x, y: pt.y, in: size)
-            p.y -= pt.height * size.height * 0.18
+            p.y -= pt.height * size.height * Self.heightLift
             step == 0 ? path.move(to: p) : path.addLine(to: p)
         }
         context.stroke(path, with: .color(.white.opacity(0.85)), style: StrokeStyle(lineWidth: 2, dash: [5, 6]))
@@ -70,7 +75,7 @@ struct CupPongTableView: View {
         var p = CupPongGeometry.project(x: ball.x, y: ball.y, in: size)
         let shadow = Path(ellipseIn: CGRect(x: p.x - 7, y: p.y - 3, width: 14, height: 6))
         context.fill(shadow, with: .color(.black.opacity(0.25)))
-        p.y -= ball.height * size.height * 0.18
+        p.y -= ball.height * size.height * Self.heightLift
         let r = 9 * CupPongGeometry.scale(y: ball.y, in: size) * (1 + ball.height * 0.4)
         context.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
                      with: .radialGradient(Gradient(colors: [.white, Color(white: 0.75)]), center: CGPoint(x: p.x - r * 0.3, y: p.y - r * 0.3), startRadius: 0, endRadius: r * 1.5))
