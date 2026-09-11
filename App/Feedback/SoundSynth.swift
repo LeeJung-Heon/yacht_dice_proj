@@ -97,6 +97,32 @@ enum SoundSynth {
         return normalized(samples, peak: 0.7)
     }
 
+    /// 돌끼리 부딪히는 "딱". 짧고 밝은 클릭.
+    static func clack() -> [Float] {
+        let n = Int(0.08 * sampleRate)
+        var rng = LCG(seed: 131)
+        var r1 = Resonator(frequency: 2600, q: 10), r2 = Resonator(frequency: 4100, q: 8)
+        let samples = (0..<n).map { i -> Float in
+            let t = Float(i) / Float(sampleRate)
+            let x = (rng.nextFloat() * 2 - 1) * exp(-t * 900)
+            return (r1.run(x) * 0.9 + r2.run(x) * 0.5) * exp(-t * 55)
+        }
+        return normalized(samples, peak: 0.7)
+    }
+
+    /// 판에서 떨어지는 "툭". 낮은 바디에 짧은 노이즈.
+    static func drop() -> [Float] {
+        let n = Int(0.12 * sampleRate)
+        var rng = LCG(seed: 137)
+        var body = Resonator(frequency: 110, q: 4), knock = Resonator(frequency: 900, q: 5)
+        let samples = (0..<n).map { i -> Float in
+            let t = Float(i) / Float(sampleRate)
+            let x = (rng.nextFloat() * 2 - 1) * exp(-t * 300)
+            return body.run(x) * 2.0 * exp(-t * 20) + knock.run(x) * 0.6 * exp(-t * 60)
+        }
+        return normalized(samples, peak: 0.7)
+    }
+
     /// 결정적 난수. 같은 파형이 나온다.
     struct LCG {
         var state: UInt64
