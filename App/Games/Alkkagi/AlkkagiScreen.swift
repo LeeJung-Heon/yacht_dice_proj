@@ -21,7 +21,12 @@ struct AlkkagiScreen: View {
     @State private var disconnectTask: Task<Void, Never>?
 
     private var seatNames: [String] { match.participants.map(\.displayName) }
-    private var mySeat: Int { match.localSeat ?? 0 }
+    /// 판이 끝나면 차례가 없어 좌석을 잃는다. 로컬은 이긴 좌석을 시점으로 삼아 "내 돌"이 뒤바뀌지 않게 한다.
+    private var mySeat: Int {
+        if let seat = match.localSeat { return seat }
+        if !match.mode.isOnline, case .win(let seat)? = match.outcome { return seat }
+        return 0
+    }
     /// 온라인의 좌석 1은 내 돌이 아래에 오게 판을 돌린다.
     private var flipped: Bool { match.mode.isOnline && match.localSeat == 1 }
     private var shown: [[Alkkagi.Point?]] { playing ?? match.state.stones }
@@ -92,7 +97,8 @@ struct AlkkagiScreen: View {
         }
         .onChange(of: match.lastRemoteMove?.id) { _, _ in
             guard let remote = match.lastRemoteMove, let sim = match.state.lastSimulation else { return }
-            let dropped = sim.events.filter { if case .dropped = $0.kind { true } else { false } }.count
+            // 튕긴 사람이 제 돌을 떨어뜨린 것은 세지 않는다 — 몇 개를 앗겼는지만 알린다.
+            let dropped = sim.events.filter { if case .dropped(let ref) = $0.kind { ref.seat != remote.seat } else { false } }.count
             showToast(dropped == 0 ? "\(seatNames[remote.seat]): 빗나감" : "\(seatNames[remote.seat]): 돌 \(dropped)개 떨어뜨림")
         }
         .onChange(of: match.isConnected, initial: true) { _, connected in
@@ -177,10 +183,14 @@ struct AlkkagiScreen: View {
                 let sim = Alkkagi.simulate(match.state, flick)
                 // 잠금은 Task를 만들기 전에 건다. 그 사이에 두 번째 당김이 들어오면 돌이 두 번 날아간다.
                 isPlaying = true
+                // 수는 재생을 기다리지 않고 먼저 판에 넣는다 — 상대가 내 애니메이션 1.5~5초를 기다릴 일이 아니다.
+                // 첫 프레임을 미리 그려 두었으니 play가 상태를 바꾸어도 튕기기 전 배치가 비치지 않는다.
+                playing = sim.frames.first?.stones
                 Task {
-                    await Self.replay(sim, playing: $playing, isPlaying: $isPlaying)
+                    async let animation: Void = Self.replay(sim, playing: $playing, isPlaying: $isPlaying)
                     let played = await match.play(flick)
                     if !played { showToast("지금은 튕길 수 없다") }
+                    await animation
                 }
             }
     }
@@ -198,21 +208,31 @@ struct AlkkagiScreen: View {
     private static func replay(_ sim: Alkkagi.Simulation, playing: Binding<[[Alkkagi.Point?]]?>, isPlaying: Binding<Bool>) async {
         isPlaying.wrappedValue = true
         var eventIndex = 0
-        for (i, frame) in sim.frames.enumerated() {
-            playing.wrappedValue = frame.stones
-            // 마지막 프레임은 스텝이 frameEvery의 배수가 아닐 수 있어, 남은 사건을 여기서 모두 낸다.
-            let stepEnd = i == sim.frames.count - 1 ? sim.steps : i * Alkkagi.frameEvery
-            while eventIndex < sim.events.count, sim.events[eventIndex].step <= stepEnd {
-                switch sim.events[eventIndex].kind {
+        for i in sim.frames.indices {
+            playing.wrappedValue = sim.frames[i].stones
+            for event in eventsToPlay(in: sim, frame: i, from: &eventIndex) {
+                switch event.kind {
                 case .collision: SoundPlayer.shared.play(SoundSynth.clack(), key: "clack"); Haptics.shared.play(.impactMedium)
                 case .dropped: SoundPlayer.shared.play(SoundSynth.drop(), key: "drop"); Haptics.shared.play(.impactHeavy)
                 }
-                eventIndex += 1
             }
-            try? await Task.sleep(for: .milliseconds(33))
+            // 화면을 떠나 재생이 끊기면 남은 프레임과 소리를 버린다. 배치는 아래에서 상태의 것으로 되돌린다.
+            do { try await Task.sleep(for: .milliseconds(33)) } catch { break }
         }
         playing.wrappedValue = nil
         isPlaying.wrappedValue = false
+    }
+
+    /// i번째 프레임에서 낼 사건들. 사건은 스텝으로 프레임에 짝지으며, 마지막 프레임은 스텝이
+    /// frameEvery의 배수가 아닐 수 있어 남은 사건을 모두 가져간다. 순수 함수라 테스트한다.
+    static func eventsToPlay(in sim: Alkkagi.Simulation, frame i: Int, from eventIndex: inout Int) -> [Alkkagi.Event] {
+        let stepEnd = i == sim.frames.count - 1 ? sim.steps : i * Alkkagi.frameEvery
+        var due: [Alkkagi.Event] = []
+        while eventIndex < sim.events.count, sim.events[eventIndex].step <= stepEnd {
+            due.append(sim.events[eventIndex])
+            eventIndex += 1
+        }
+        return due
     }
 
     private func showBanner(_ text: String) {
