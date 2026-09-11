@@ -132,12 +132,13 @@ public enum Alkkagi: Game {
     public static func currentSeat(_ state: State) -> Int? { state.nextSeat }
     public static func outcome(_ state: State) -> Outcome? { state.outcome }
 
-    /// 정수 제곱근(내림).
+    /// 정수 제곱근(내림). 0과 음수는 0으로 본다.
+    /// 어림은 Double로 잡되 보정은 정수 나눗셈으로만 해 결과가 기기와 무관하게 같고, 제곱이 Int를 넘치지도 않는다.
     public static func isqrt(_ n: Int) -> Int {
         guard n > 0 else { return 0 }
-        var x = Int(Double(n).squareRoot())
-        while x * x > n { x -= 1 }
-        while (x + 1) * (x + 1) <= n { x += 1 }
+        var x = max(1, Int(Double(n).squareRoot()))
+        while x > n / x { x -= 1 }
+        while x + 1 <= n / (x + 1) { x += 1 }
         return x
     }
 
@@ -149,8 +150,9 @@ public enum Alkkagi: Game {
         var alive: Bool
     }
 
+    /// 규칙에 맞지 않는 수는 아무것도 움직이지 않은 시뮬레이션으로 돌려보내, 방향이 0인 수나 없는 돌에도 멎지 않는다.
     public static func simulate(_ state: State, _ flick: Flick) -> Simulation {
-        guard let seat = state.nextSeat else {
+        guard canApply(flick, to: state), let seat = state.nextSeat else {
             return Simulation(frames: [Frame(stones: state.stones)], events: [], final: state.stones, steps: 0)
         }
         var bodies: [[Body?]] = state.stones.map { row in row.map { $0.map { Body(pos: $0, vx: 0, vy: 0, alive: true) } } }

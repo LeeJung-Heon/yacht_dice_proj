@@ -28,6 +28,8 @@ struct AlkkagiTests {
     func 제곱근() {
         #expect(Alkkagi.isqrt(0) == 0 && Alkkagi.isqrt(1) == 1 && Alkkagi.isqrt(15) == 3 && Alkkagi.isqrt(16) == 4)
         #expect(Alkkagi.isqrt(1_000_000_000_000) == 1_000_000)
+        #expect(Alkkagi.isqrt(-1) == 0 && Alkkagi.isqrt(Int.min) == 0)
+        #expect(Alkkagi.isqrt(Int.max) == 3_037_000_499)
     }
 
     @Test("같은 수는 같은 시뮬레이션이다")
@@ -53,10 +55,38 @@ struct AlkkagiTests {
         let s = Alkkagi.initial()
         let sim = Alkkagi.simulate(s, .init(stone: 2, dx: 0, dy: 1000, power: 450))   // 접촉 시 속도 ≈ 3000
         let black = sim.final[0][2]!, white = sim.final[1][2]!
-        #expect((9100...9350).contains(black.y) && black.x == 6000, "흑 \(black)")
-        #expect((10150...10550).contains(white.y) && white.x == 6000, "백 \(white)")
-        #expect(sim.events.contains { if case .collision = $0.kind { true } else { false } })
-        #expect(!sim.events.contains { if case .dropped = $0.kind { true } else { false } })
+        #expect(black == P(x: 6000, y: 9210), "흑 \(black)")
+        #expect(white == P(x: 6000, y: 10345), "백 \(white)")
+        #expect(sim.events == [.init(step: 105, kind: .collision(a: .init(seat: 0, stone: 2), b: .init(seat: 1, stone: 2)))],
+                "\(sim.events)")
+    }
+
+    /// 딱 붙은 두 돌을 정면으로 쳐 반발 9/10이 법선 속도를 바꾸는 것을 본다.
+    /// 속도 3000으로 친 흑은 첫 스텝에 마찰로 2900이 되어 닿고, 백은 (2900 + 0) / 2 + 9 * 2900 / 20 = 2755를,
+    /// 흑은 145를 가진다. 백은 2755 / 100 ≈ 28스텝 동안 2755² / (2 * 100 * 120) ≈ 316만큼 굴러 2813에서 3129쯤에 서고,
+    /// 스텝마다 버리는 소수 때문에 실제로는 29스텝에 3126이다.
+    @Test("정면으로 치면 맞은 돌이 반발만큼 받고 친 돌은 거의 선다")
+    func 충돌_속도() {
+        let empty: [Alkkagi.Point?] = [nil, nil, nil, nil, nil]
+        var stones: [[Alkkagi.Point?]] = [empty, empty]
+        stones[0][0] = P(x: 6000, y: 2000)
+        stones[1][0] = P(x: 6000, y: 2800)
+        let s = Alkkagi.State(stones: stones, nextSeat: 0, outcome: nil)
+        let sim = Alkkagi.simulate(s, .init(stone: 0, dx: 0, dy: 1000, power: 100))
+        let black = sim.final[0][0]!, white = sim.final[1][0]!
+        #expect(sim.events == [.init(step: 1, kind: .collision(a: .init(seat: 0, stone: 0), b: .init(seat: 1, stone: 0)))],
+                "\(sim.events)")
+        #expect(white.y > 2800 && abs(white.y - 3126) <= 30, "백 \(white)")
+        #expect(abs(black.y - 2000) < 60 && black.x == 6000, "흑 \(black)")
+    }
+
+    @Test("규칙에 맞지 않는 수는 아무것도 움직이지 않는다")
+    func 무효_수_시뮬레이션() {
+        let s = Alkkagi.initial()
+        let sim = Alkkagi.simulate(s, .init(stone: 0, dx: 0, dy: 0, power: 5))
+        #expect(sim.steps == 0 && sim.final == s.stones && sim.events.isEmpty)
+        #expect(sim.frames == [.init(stones: s.stones)])
+        #expect(Alkkagi.simulate(s, .init(stone: 9, dx: 0, dy: 1000, power: 5)).final == s.stones)
     }
 
     @Test("세게 치면 상대 돌이 떨어지고 지워진다")
