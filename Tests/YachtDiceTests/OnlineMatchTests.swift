@@ -164,3 +164,50 @@ struct CupPongMatchTests {
         #expect(ta.lastPayload?.finished == true && ta.lastPayload?.winnerSeat == 0)
     }
 }
+
+@Suite("OnlineMatch - 알까기")
+@MainActor
+struct AlkkagiMatchTests {
+    static func winningMoves() -> [Alkkagi.Flick] {
+        var moves: [Alkkagi.Flick] = []
+        for i in 0..<5 {
+            moves.append(.init(stone: i, dx: 0, dy: 1000, power: 1000))
+            if i < 4 { moves.append(.init(stone: i + 1, dx: 1000, dy: 0, power: 1)) }
+        }
+        return moves
+    }
+
+    private func makePair() -> (OnlineMatch<Alkkagi>, OnlineMatch<Alkkagi>, InMemoryTurnTransport) {
+        let (ta, tb) = InMemoryTurnTransport.pair()
+        let a = OnlineMatch(game: Alkkagi.self, mode: .online(matchID: "k"),
+                            participants: [.human(name: "A"), .remote(playerID: "b", name: "B")], log: MoveLog<Alkkagi>(), transport: ta)
+        let b = OnlineMatch(game: Alkkagi.self, mode: .online(matchID: "k"),
+                            participants: [.remote(playerID: "a", name: "A"), .human(name: "B")], log: MoveLog<Alkkagi>(), transport: tb)
+        a.startListening(); b.startListening()
+        return (a, b, ta)
+    }
+
+    @Test("튕김이 상대에게 재생되고 차례가 넘어간다")
+    func 한_수_전파() async throws {
+        let (a, b, ta) = makePair()
+        var replayed: [Alkkagi.Flick] = []
+        b.onRemoteMove = { flick, _ in replayed.append(flick) }
+        let ok = await a.play(.init(stone: 0, dx: 0, dy: 1000, power: 1000)); #expect(ok)
+        await b.waitForIncoming()
+        #expect(replayed.count == 1 && b.state.remaining(seat: 1) == 4 && b.isLocalTurn && !a.isLocalTurn)
+        #expect(ta.lastPayload?.turnSeat == 1)
+        #expect(b.state.lastSimulation != nil, "재생용 시뮬레이션이 상태에 남는다")
+    }
+
+    @Test("아홉 수로 끝나고 승자가 실린다")
+    func 완주() async throws {
+        let (a, b, ta) = makePair()
+        for (i, f) in Self.winningMoves().enumerated() {
+            let mover = i % 2 == 0 ? a : b, other = i % 2 == 0 ? b : a
+            let ok = await mover.play(f); #expect(ok, "\(i)")
+            await other.waitForIncoming()
+        }
+        #expect(a.outcome == .win(seat: 0) && b.outcome == .win(seat: 0))
+        #expect(ta.lastPayload?.finished == true && ta.lastPayload?.winnerSeat == 0)
+    }
+}

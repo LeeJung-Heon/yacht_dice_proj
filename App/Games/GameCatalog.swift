@@ -18,6 +18,6 @@ enum GameID: String, CaseIterable, Sendable {
     var icon: String {
         switch self { case .yacht: "dice"; case .omok: "circle.grid.3x3"; case .cuppong: "cup.and.saucer"; case .alkkagi: "circle.circle" }
     }
-    /// 아직 만들지 않은 게임은 타일이 흐리고 "준비 중"이다.
-    var isAvailable: Bool { self != .alkkagi }
+    /// 네 게임 모두 만들어졌으므로 타일은 항상 눌린다.
+    var isAvailable: Bool { true }
 }

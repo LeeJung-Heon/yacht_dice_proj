@@ -91,10 +91,6 @@ final class MenuUITests: XCTestCase {
         XCTAssertTrue(app.buttons["menu.omok.local"].waitForExistence(timeout: 5))
         app.buttons["menu.back"].tap()
         XCTAssertTrue(app.buttons["hub.yacht"].waitForExistence(timeout: 5))
-        // 준비 중인 게임은 허브에 보이되 눌리지 않는다
-        let alkkagi = app.buttons["hub.alkkagi"]
-        XCTAssertTrue(alkkagi.waitForExistence(timeout: 5))
-        XCTAssertFalse(alkkagi.isEnabled, "준비 중 타일이 눌린다")
     }
 
     @MainActor
@@ -107,6 +103,20 @@ final class MenuUITests: XCTestCase {
         XCTAssertTrue(tile.isEnabled)
         tile.tap()
         XCTAssertTrue(app.buttons["menu.cuppong.local"].waitForExistence(timeout: 5))
+        app.buttons["menu.back"].tap()
+        XCTAssertTrue(app.buttons["hub.yacht"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func test_허브에서_알까기_메뉴가_열린다() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-resetMatch", "-noPush", "-noGameCenter"]
+        app.launch()
+        let tile = app.buttons["hub.alkkagi"]
+        XCTAssertTrue(tile.waitForExistence(timeout: 10))
+        XCTAssertTrue(tile.isEnabled)
+        tile.tap()
+        XCTAssertTrue(app.buttons["menu.alkkagi.local"].waitForExistence(timeout: 5))
         app.buttons["menu.back"].tap()
         XCTAssertTrue(app.buttons["hub.yacht"].waitForExistence(timeout: 5))
     }

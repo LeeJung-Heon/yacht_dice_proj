@@ -141,4 +141,20 @@ struct AppContainerTests {
         guard case .playingCupPong(let resumed) = container.status else { Issue.record("이어하기 실패"); return }
         #expect(resumed.state.remaining(seat: 1) == 9)
     }
+
+    @Test("알까기 로컬 2인을 시작하면 OnlineMatch<Alkkagi>가 만들어지고 튕긴 뒤 이어하기가 된다")
+    func 알까기_로컬() async throws {
+        let (container, dir) = try makeContainer()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        container.startAlkkagiLocal(names: ["갑", "을"])
+        guard case .playingAlkkagi(let match) = container.status else { Issue.record("알까기가 아니다"); return }
+        let ok = await match.play(Alkkagi.Flick(stone: 0, dx: 0, dy: 1000, power: 1000)); #expect(ok)
+        let saved = try #require(MatchStore(directory: dir).load())
+        #expect(saved.game == "alkkagi" && saved.mode == .passAndPlay(names: ["갑", "을"]))
+        container.returnToMenu()
+        guard case .menu(.alkkagi) = container.status else { Issue.record("알까기 메뉴가 아니다"); return }
+        container.resumeSavedGame()
+        guard case .playingAlkkagi(let resumed) = container.status else { Issue.record("이어하기 실패"); return }
+        #expect(resumed.state.remaining(seat: 1) == 4)
+    }
 }
