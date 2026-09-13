@@ -91,9 +91,10 @@ struct AlkkagiScreen: View {
         }
         .onDisappear { match.onRemoteMove = nil }
         .onChange(of: match.log.moves.count, initial: true) { _, _ in
-            guard match.outcome == nil, let seat = Alkkagi.currentSeat(match.state) else { return }
-            // 로컬 2인은 두 좌석 다 내 것이라 "내 차례"가 아무것도 알려주지 않는다. 이름을 부른다.
-            showBanner(match.mode.isOnline && match.isLocalTurn ? "내 차례" : "\(seatNames[seat]) 차례")
+            // 재생 중에 뜨면 배너가 날아가는 돌을 덮는다. 내 튕김은 재생이 끝난 뒤 Task가 다시 부르고,
+            // 상대 수는 훅의 재생이 끝난 다음에 로그가 붙어 여기서 그대로 불린다.
+            guard !isPlaying else { return }
+            announceTurn()
         }
         .onChange(of: match.lastRemoteMove?.id) { _, _ in
             guard let remote = match.lastRemoteMove, let sim = match.state.lastSimulation else { return }
@@ -191,6 +192,8 @@ struct AlkkagiScreen: View {
                     let played = await match.play(flick)
                     if !played { showToast("지금은 튕길 수 없다") }
                     await animation
+                    // 돌이 멎은 뒤에 다음 차례를 알린다 — 로그가 붙던 때는 재생 중이라 배너를 미뤘다.
+                    announceTurn()
                 }
             }
     }
@@ -233,6 +236,13 @@ struct AlkkagiScreen: View {
             eventIndex += 1
         }
         return due
+    }
+
+    /// 지금 차례를 배너로 알린다. 판이 끝났으면 알릴 차례가 없다.
+    private func announceTurn() {
+        guard match.outcome == nil, let seat = Alkkagi.currentSeat(match.state) else { return }
+        // 로컬 2인은 두 좌석 다 내 것이라 "내 차례"가 아무것도 알려주지 않는다. 이름을 부른다.
+        showBanner(match.mode.isOnline && match.isLocalTurn ? "내 차례" : "\(seatNames[seat]) 차례")
     }
 
     private func showBanner(_ text: String) {
