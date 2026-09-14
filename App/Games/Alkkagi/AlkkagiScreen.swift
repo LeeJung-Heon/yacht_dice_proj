@@ -1,9 +1,10 @@
+import Foundation
 import SwiftUI
 import GameCore
 
 /// 알까기 한 판. 판이 열리면 먼저 제 진영에 돌 다섯을 놓고, 그다음부터는
 /// 내 돌을 잡아 당겼다 놓으면 새총처럼 반대로 튕겨 나가고,
-/// 시뮬레이션이 만든 프레임을 30fps로 재생한다 — 로컬 2인은 한 기기에서 좌석이 번갈아 넘어간다.
+/// 시뮬레이션이 만든 프레임을 흐른 시간으로 이어 화면 주사율로 재생한다 — 로컬 2인은 한 기기에서 좌석이 번갈아 넘어간다.
 struct AlkkagiScreen: View {
     let match: OnlineMatch<Alkkagi>
     var onReturn: () -> Void = {}
@@ -17,6 +18,14 @@ struct AlkkagiScreen: View {
     /// 한 기기에서 좌석이 넘어간 직후에는 "배치 완료"를 잠근다. 두 번 두드린 손가락이 다음 사람 몫까지 놓아 버린다.
     @State private var placeLocked = false
     @State private var placeLockTask: Task<Void, Never>?
+    /// 재생 중인 한 수. 시작 시각을 함께 들어 화면이 흐른 시간만으로 어느 프레임 사이인지 셈한다.
+    struct Replay: Sendable {
+        let sim: Alkkagi.Simulation
+        let seat: Int
+        let start: Date
+    }
+    /// 지금 흐르는 재생. nil이면 시계가 멎고 판은 상태의 배치를 그린다.
+    @State private var replay: Replay?
     /// 재생 중인 프레임의 배치. nil이면 상태의 배치를 그린다.
     @State private var playing: [[Alkkagi.Point?]]?
     /// 재생 중인 수를 둔 좌석. 수는 먼저 판에 들어가므로 머리글은 상태가 아니라 이 좌석을 따라간다.
@@ -37,6 +46,12 @@ struct AlkkagiScreen: View {
         // 초안은 내가 놓을 차례에만 얹는다 — 상대가 놓는 동안 내 자리는 비어 있고 명패도 0을 든다.
         if placingSeat == mySeat { stones[mySeat] = myDraft.map { Optional($0) } }
         return stones
+    }
+    /// 그 시각에 그릴 배치. 재생 중이면 흐른 시간으로 프레임 사이를 이어 내고, 아니면 늘 그리던 것이다.
+    private func renderedStones(at date: Date) -> [[Alkkagi.Point?]] {
+        guard let replay else { return displayedStones }
+        let elapsed = date.timeIntervalSince(replay.start) * Double(Alkkagi.stepsPerSecond)
+        return Self.interpolated(replay.sim, elapsedSteps: elapsed)
     }
     /// 지금 놓아야 하는 좌석. 배치가 끝났으면 nil이다.
     private var placingSeat: Int? { match.state.phase == .setup ? Alkkagi.currentSeat(match.state) : nil }
@@ -94,11 +109,15 @@ struct AlkkagiScreen: View {
                 header
                 seats
                 GeometryReader { proxy in
-                    AlkkagiBoardView(stones: displayedStones, flipped: flipped, pull: drawnPull, preview: previewPath,
-                                     highlight: grabbed, highlightSeat: displayedSeat ?? 0,
-                                     homeShade: placingSeat.map { Alkkagi.homeRange(seat: $0) }, dragging: draggingDraft)
-                        .contentShape(Rectangle())
-                        .gesture(dragGesture(size: proxy.size))
+                    // 시계는 재생 중에만 돈다 — 그동안은 화면 주사율마다 불려 프레임 사이를 이어 그리고,
+                    // 멎으면 여느 뷰처럼 상태가 바뀔 때만 다시 그린다.
+                    TimelineView(.animation(paused: replay == nil)) { context in
+                        AlkkagiBoardView(stones: renderedStones(at: context.date), flipped: flipped, pull: drawnPull,
+                                         preview: previewPath, highlight: grabbed, highlightSeat: displayedSeat ?? 0,
+                                         homeShade: placingSeat.map { Alkkagi.homeRange(seat: $0) }, dragging: draggingDraft)
+                            .contentShape(Rectangle())
+                            .gesture(dragGesture(size: proxy.size))
+                    }
                 }
                 .aspectRatio(1, contentMode: .fit)
                 actionBar
@@ -123,7 +142,7 @@ struct AlkkagiScreen: View {
             }
         }
         // 훅이 match를 강하게 담으면 match → onRemoteMove → match 고리가 되어, 판을 떠나도 세션이 살아남는다.
-        .task { [weak match, playing = $playing, isPlaying = $isPlaying, replayingSeat = $replayingSeat] in
+        .task { [weak match, replay = $replay, playing = $playing, isPlaying = $isPlaying, replayingSeat = $replayingSeat] in
             guard let match else { return }
             match.onRemoteMove = { [weak match] move, _ in
                 // 배치는 재생할 움직임이 없다 — 판에 돌이 놓인 것은 상태가 바뀌며 그대로 그려진다.
@@ -131,7 +150,8 @@ struct AlkkagiScreen: View {
                 // 훅은 수가 로그에 붙기 전에 불리므로 여기의 state는 수 전 배치다 — apply와 같은 재생이 나오고 좌석도 튕긴 쪽이다.
                 let seat = Alkkagi.currentSeat(match.state) ?? 0
                 let sim = Alkkagi.simulate(match.state, flick)
-                await Self.replay(sim, seat: seat, playing: playing, isPlaying: isPlaying, replayingSeat: replayingSeat)
+                await Self.replay(sim, seat: seat, from: .now, replay: replay, playing: playing,
+                                  isPlaying: isPlaying, replayingSeat: replayingSeat)
             }
         }
         .onDisappear { match.onRemoteMove = nil }
@@ -278,8 +298,12 @@ struct AlkkagiScreen: View {
                 // 수는 재생을 기다리지 않고 먼저 판에 넣는다 — 상대가 내 애니메이션(길어야 1.5초)을 기다릴 일이 아니다.
                 // 첫 프레임을 미리 그려 두었으니 play가 상태를 바꾸어도 튕기기 전 배치가 비치지 않는다.
                 playing = sim.frames.first?.stones
+                // 시계는 여기서 시작한다 — 소리를 내는 Task와 그림이 같은 시각을 셈해 둘이 어긋나지 않는다.
+                let start = Date.now
+                replay = Replay(sim: sim, seat: seat, start: start)
                 Task {
-                    async let animation: Void = Self.replay(sim, seat: seat, playing: $playing, isPlaying: $isPlaying,
+                    async let animation: Void = Self.replay(sim, seat: seat, from: start, replay: $replay,
+                                                            playing: $playing, isPlaying: $isPlaying,
                                                             replayingSeat: $replayingSeat)
                     let played = await match.play(.flick(flick))
                     if !played { showToast("지금은 튕길 수 없다") }
@@ -318,16 +342,29 @@ struct AlkkagiScreen: View {
         return "\(seatNames[seat]) 승리"
     }
 
-    /// 프레임을 30fps로 재생하고 충돌·낙하 프레임에 소리와 햅틱을 낸다. 내 튕김과 상대 재생이 같은 길을 쓴다.
+    /// 재생을 열고, 프레임이 놓인 시각마다 그 사이에 난 충돌·낙하의 소리와 햅틱을 낸 다음, 마지막 프레임 시각에 거둔다.
+    /// 그림은 시계가 화면 주사율로 그리므로 여기서는 프레임을 쓰지 않는다. 내 튕김과 상대 재생이 같은 길을 쓴다.
     ///
     /// 화면 상태 바인딩만 받는 정적 함수다. 훅이 뷰 값을 담으면 그 안의 `match`까지 함께 잡힌다.
     @MainActor
-    private static func replay(_ sim: Alkkagi.Simulation, seat: Int, playing: Binding<[[Alkkagi.Point?]]?>,
-                               isPlaying: Binding<Bool>, replayingSeat: Binding<Int?>) async {
+    private static func replay(_ sim: Alkkagi.Simulation, seat: Int, from start: Date, replay: Binding<Replay?>,
+                               playing: Binding<[[Alkkagi.Point?]]?>, isPlaying: Binding<Bool>,
+                               replayingSeat: Binding<Int?>) async {
+        replay.wrappedValue = Replay(sim: sim, seat: seat, start: start)
+        // 머리글과 명패는 여전히 첫 프레임의 배치를 센다 — 수가 먼저 들어가도 튕기기 전 숫자가 보인다.
+        playing.wrappedValue = sim.frames.first?.stones
         isPlaying.wrappedValue = true
         replayingSeat.wrappedValue = seat
         var eventIndex = 0
         for i in sim.frames.indices {
+            // 프레임이 놓인 스텝의 벽시계 시각까지 기다린다. 마지막 프레임만 frameEvery의 배수가 아닐 수 있다.
+            let step = i == sim.frames.count - 1 ? sim.steps : i * Alkkagi.frameEvery
+            let due = start.addingTimeInterval(Double(step) / Double(Alkkagi.stepsPerSecond)).timeIntervalSinceNow
+            // 화면을 떠나 재생이 끊기면 남은 사건과 소리를 버린다. 배치는 아래에서 상태의 것으로 되돌린다.
+            do {
+                if due > 0 { try await Task.sleep(for: .seconds(due)) } else { try Task.checkCancellation() }
+            } catch { break }
+            // 머리글과 명패의 돌 수는 프레임마다 갱신해 떨어지는 순간에 줄어든다. 판은 시계가 그리므로 영향이 없다.
             playing.wrappedValue = sim.frames[i].stones
             for event in eventsToPlay(in: sim, frame: i, from: &eventIndex) {
                 switch event.kind {
@@ -335,12 +372,37 @@ struct AlkkagiScreen: View {
                 case .dropped: SoundPlayer.shared.play(SoundSynth.drop(), key: "drop"); Haptics.shared.play(.impactHeavy)
                 }
             }
-            // 화면을 떠나 재생이 끊기면 남은 프레임과 소리를 버린다. 배치는 아래에서 상태의 것으로 되돌린다.
-            do { try await Task.sleep(for: .milliseconds(33)) } catch { break }
         }
+        // 다른 재생이 그 사이 시작됐으면 그쪽 상태를 지우지 않는다.
+        guard replay.wrappedValue?.start == start else { return }
+        replay.wrappedValue = nil
         playing.wrappedValue = nil
         isPlaying.wrappedValue = false
         replayingSeat.wrappedValue = nil
+    }
+
+    /// 흐른 스텝에 그릴 배치. 프레임 사이를 곧게 이어 30fps보다 촘촘한 화면에서도 그림이 끊기지 않는다.
+    /// 마지막 칸만 스텝이 frameEvery의 배수가 아닐 수 있어 실제 길이로 나누고, 흐름이 다하면 끝 배치에 딱 앉는다.
+    /// 다음 프레임에서 사라진 돌은 그 칸이 끝날 때까지 있던 자리에 둔다 — 떨어지는 돌이 사라지기 전에 미끄러지지 않는다.
+    /// 순수 함수라 테스트한다.
+    static func interpolated(_ sim: Alkkagi.Simulation, elapsedSteps: Double) -> [[Alkkagi.Point?]] {
+        guard let first = sim.frames.first else { return sim.final }
+        let steps = Double(sim.steps)
+        let elapsed = min(max(elapsedSteps, 0), steps)
+        guard sim.frames.count > 1, elapsed < steps else { return elapsed <= 0 ? first.stones : sim.final }
+        let i = min(Int(elapsed) / Alkkagi.frameEvery, sim.frames.count - 2)
+        let begin = Double(i * Alkkagi.frameEvery)
+        let end = i == sim.frames.count - 2 ? steps : begin + Double(Alkkagi.frameEvery)
+        let t = end > begin ? min(max((elapsed - begin) / (end - begin), 0), 1) : 0
+        let next = sim.frames[i + 1].stones
+        return sim.frames[i].stones.enumerated().map { seat, row in
+            row.enumerated().map { stone, point -> Alkkagi.Point? in
+                guard let point else { return nil }
+                guard let to = next[seat][stone] else { return point }
+                return Alkkagi.Point(x: point.x + Int((Double(to.x - point.x) * t).rounded()),
+                                     y: point.y + Int((Double(to.y - point.y) * t).rounded()))
+            }
+        }
     }
 
     /// i번째 프레임에서 낼 사건들. 사건은 스텝으로 프레임에 짝지으며, 마지막 프레임은 스텝이
