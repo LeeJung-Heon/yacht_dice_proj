@@ -74,9 +74,9 @@ public enum Alkkagi: Game {
 
 | 파일 | 책임 |
 |---|---|
-| `App/Games/Alkkagi/AlkkagiGeometry.swift` | `project(_ p: Point, in size: CGSize, flipped: Bool) -> CGPoint`(판을 정사각형에 맞추고 `flipped`면 180°), `point(at: CGPoint, in:flipped:) -> Point`, `stone(at:stones:in:flipped:) -> Int?`(여유 안에서 가장 가까운 돌), `clampPull(from:to:) -> Point`(최대 당김에서 끊는다), `flick(stone: Int, from origin: Point, to finger: Point) -> Flick?`(격자 점 둘을 받아 끈 길이 3200 = power 1000, 방향은 끈 반대) |
-| `App/Games/Alkkagi/AlkkagiBoardView.swift` | `Canvas`: 나무 판·13×13 격자·화점 5개·돌(흑백, 그림자·하이라이트)·당김 선과 화살표·예상 궤적 점선(시뮬레이션 앞 40프레임의 그 돌 위치)·재생 중 프레임의 돌 위치. 식별자 `alkkagi.board`, 라벨 "흑 n · 백 m" |
-| `App/Games/Alkkagi/AlkkagiScreen.swift` | 헤더(`header.menu`, `header.status` = "내 돌 N · 상대 돌 M", `header.turn`), 명패 둘(`players.seat.<i>`, `players.presence.<i>`), 드래그(내 돌 위에서 시작한 것만) → 놓으면 `match.play(Flick)`, 프레임 재생(30fps, 충돌 프레임에 `SoundSynth.clack`·햅틱, 낙하에 `drop`), 상대 수 재생(`onRemoteMove`가 `simulate`로 프레임을 만들어 같은 재생), 차례 배너·토스트·연결 띠·결과 카드(`alkkagi.result`, `alkkagi.back`), `scenePhase` resync |
+| `App/Games/Alkkagi/AlkkagiGeometry.swift` | `margin = spacing / 2`(바깥 여백 반 칸, 모든 사상이 쓴다), `snap(_ p: Point) -> Point`(가장 가까운 교차점으로 붙이고 판 안에 묶는다), `project(_ p: Point, in size: CGSize, flipped: Bool) -> CGPoint`(판을 정사각형에 맞추고 `flipped`면 180°), `point(at: CGPoint, in:flipped:) -> Point`, `stone(at:stones:in:flipped:) -> Int?`(여유 안에서 가장 가까운 돌), `clampPull(from:to:) -> Point`(최대 당김에서 끊는다), `flick(stone: Int, from origin: Point, to finger: Point) -> Flick?`(격자 점 둘을 받아 끈 길이 3200 = power 1000, 방향은 끈 반대) |
+| `App/Games/Alkkagi/AlkkagiBoardView.swift` | `Canvas`: 나무 판·13×13 격자·화점 5개·돌(흑백, 그림자·하이라이트)·`homeShade: ClosedRange<Int>?`(놓는 좌석의 진영을 옅은 황동으로 칠한다)·`dragging: (seat, stone, at)?`(끌리는 돌을 손끝에 맨 위로 그린다)·당김 선과 화살표·예상 궤적 점선(시뮬레이션 앞 40프레임의 그 돌 위치)·재생 중 프레임의 돌 위치. 식별자 `alkkagi.board`, 라벨 "흑 n · 백 m" |
+| `App/Games/Alkkagi/AlkkagiScreen.swift` | 한 줄 헤더(`header.menu`, `header.status` = "내 돌 N · 상대 돌 M"이고 배치 중에는 "배치 중", `header.turn` = "<이름> 차례"이고 배치 중에는 "<이름> 배치"), 배치 단계(초안 `draft`를 끌어 옮기고 놓을 때 `snap`·`placementIsValid`로 거르며 "배치 완료" `alkkagi.placeDone`가 `.setup`을 둔다), 명패 둘(`players.seat.<i>`, `players.presence.<i>`), 드래그(내 돌 위에서 시작한 것만) → 놓으면 `match.play(Flick)`, 프레임 재생(30fps, 충돌 프레임에 `SoundSynth.clack`·햅틱, 낙하에 `drop`), 상대 수 재생(`onRemoteMove`가 `simulate`로 프레임을 만들어 같은 재생), 차례 배너·토스트·연결 띠·결과 카드(`alkkagi.result`, `alkkagi.back`), `scenePhase` resync |
 | `App/Games/Alkkagi/AlkkagiMenu.swift` | 로컬 2인(이름 기본값 흑·백)·온라인·이어하기, `menu.alkkagi.local`, `menu.alkkagi.online`, `menu.alkkagi.local.start`, `menu.alkkagi.name.0/1`, `menu.back` |
 | `App/Games/GameCatalog.swift` | `alkkagi.isAvailable = true`(전부 활성) |
 | `App/AppContainer.swift`, `App/YachtDiceApp.swift` | `Status.playingAlkkagi(OnlineMatch<Alkkagi>)`, `startAlkkagiLocal(names:)`, `launchAlkkagi`, `openSupabaseMatch`의 `alkkagi` 갈래, `resumeSavedGame`, `currentGame`, `stopCurrentGame`, `PushRegistration.currentMatchID`, 화면 분기 |
@@ -84,7 +84,7 @@ public enum Alkkagi: Game {
 
 ### 4.1 흐름
 
-1. 허브 → 알까기 → 로컬 2인 또는 온라인. 온라인은 P7과 같고 `row.game == "alkkagi"`면 `OnlineMatch<Alkkagi>`와 `AlkkagiScreen`이 열린다.
+1. 허브 → 알까기 → 로컬 2인 또는 온라인. 온라인은 P7과 같고 `row.game == "alkkagi"`면 `OnlineMatch<Alkkagi>`와 `AlkkagiScreen`이 열린다. 판은 배치 단계로 열려 좌석 0부터 차례로 기본 배치에서 시작한 돌 다섯을 제 진영 안 교차점으로 끌어 놓고 "배치 완료"(`alkkagi.placeDone`)로 `.setup`을 두며, 진영을 벗어나거나 돌끼리 닿는 자리는 받지 않고 둘 다 놓아야 2번의 튕기기로 넘어간다.
 2. 내 차례에 내 돌을 누른 채 끌면 돌에서 손가락까지 당김 선과 반대 방향 화살표가 보이고 `simulate`의 앞 40프레임으로 그 돌의 예상 궤적 점선을 그린다. 놓으면 `AlkkagiGeometry.flick`으로 만든 `Flick`을 `match.play`에 보낸다.
 3. 화면은 `state.lastSimulation.frames`를 30fps로 재생하며 `collision` 이벤트 프레임에 `clack`, `dropped`에 `drop`을 낸다. 재생 중 입력은 잠긴다.
 4. 상대 수는 `onRemoteMove`에서 `simulate(match.state, flick)`로 프레임을 만들어 같은 재생을 한 뒤 로그에 더해진다.

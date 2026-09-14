@@ -1,16 +1,19 @@
 import SwiftUI
 import GameCore
 
-/// 알까기 한 판. 내 돌을 잡아 당겼다 놓으면 새총처럼 반대로 튕겨 나가고,
+/// 알까기 한 판. 판이 열리면 먼저 제 진영에 돌 다섯을 놓고, 그다음부터는
+/// 내 돌을 잡아 당겼다 놓으면 새총처럼 반대로 튕겨 나가고,
 /// 시뮬레이션이 만든 프레임을 30fps로 재생한다 — 로컬 2인은 한 기기에서 좌석이 번갈아 넘어간다.
 struct AlkkagiScreen: View {
     let match: OnlineMatch<Alkkagi>
     var onReturn: () -> Void = {}
     @Environment(\.theme) private var theme
     @Environment(\.scenePhase) private var scenePhase
-    /// 잡은 돌과 손가락의 격자 위치.
+    /// 잡은 돌과 손가락의 격자 위치. 배치 중에는 초안의 돌을, 튕길 때는 판 위의 돌을 가리킨다.
     @State private var grabbed: Int?
     @State private var finger: Alkkagi.Point?
+    /// 확정하기 전의 내 배치. 내가 놓을 차례가 되면 기본 배치로 시작한다.
+    @State private var draft: [Alkkagi.Point] = []
     /// 재생 중인 프레임의 배치. nil이면 상태의 배치를 그린다.
     @State private var playing: [[Alkkagi.Point?]]?
     /// 재생 중인 수를 둔 좌석. 수는 먼저 판에 들어가므로 머리글은 상태가 아니라 이 좌석을 따라간다.
@@ -23,8 +26,28 @@ struct AlkkagiScreen: View {
     @State private var disconnectTask: Task<Void, Never>?
 
     private var seatNames: [String] { match.participants.map(\.displayName) }
-    /// 화면이 그리는 배치. 재생 중이면 프레임, 아니면 상태의 것이다. 머리글과 명패의 숫자도 모두 여기서 센다.
-    private var displayedStones: [[Alkkagi.Point?]] { playing ?? match.state.stones }
+    /// 화면이 그리는 배치. 재생 중이면 프레임, 배치 중이면 아직 확정하지 않은 내 초안을 얹은 상태,
+    /// 아니면 상태의 것이다. 머리글과 명패의 숫자도 모두 여기서 센다.
+    private var displayedStones: [[Alkkagi.Point?]] {
+        if let playing { return playing }
+        var stones = match.state.stones
+        // 상대가 놓는 동안에도 내 초안은 보인다 — 상대 돌은 이미 판에 놓인 것만 그려진다.
+        if match.state.phase == .setup, !match.state.placed[mySeat] { stones[mySeat] = myDraft.map { Optional($0) } }
+        return stones
+    }
+    /// 지금 놓아야 하는 좌석. 배치가 끝났으면 nil이다.
+    private var placingSeat: Int? { match.state.phase == .setup ? Alkkagi.currentSeat(match.state) : nil }
+    /// 내가 놓을 차례인가.
+    private var isMyPlacement: Bool { placingSeat == mySeat && match.isLocalTurn }
+    /// 그릴 내 배치. `draft`가 아직 채워지기 전 한 프레임에도 기본 배치가 보인다.
+    private var myDraft: [Alkkagi.Point] {
+        draft.count == Alkkagi.stonesPerSeat ? draft : Alkkagi.defaultPlacement(seat: mySeat)
+    }
+    /// 배치 중에 끌고 있는 내 돌. 놓기 전까지는 초안이 아니라 손끝에 그린다.
+    private var draggingDraft: (seat: Int, stone: Int, at: Alkkagi.Point)? {
+        guard match.state.phase == .setup, isMyPlacement, let grabbed, let finger else { return nil }
+        return (mySeat, grabbed, finger)
+    }
     /// 화면이 보이는 차례. 수는 재생을 기다리지 않고 먼저 들어가므로, 재생 중에는 튕긴 좌석을 그대로 든다.
     private var displayedSeat: Int? { playing != nil ? replayingSeat : Alkkagi.currentSeat(match.state) }
     private func displayedRemaining(seat: Int) -> Int { displayedStones[seat].compactMap { $0 }.count }
@@ -40,7 +63,8 @@ struct AlkkagiScreen: View {
 
     /// 잡은 돌에서 손가락까지가 당김이다. 놓으면 반대 방향으로 날아간다.
     private var pull: (from: Alkkagi.Point, to: Alkkagi.Point)? {
-        guard let grabbed, let finger, let seat = Alkkagi.currentSeat(match.state), let from = match.state.stones[seat][grabbed] else { return nil }
+        guard match.state.phase == .play, let grabbed, let finger,
+              let seat = Alkkagi.currentSeat(match.state), let from = match.state.stones[seat][grabbed] else { return nil }
         return (from, finger)
     }
     /// 화면에 그리는 당김. 최대를 넘긴 만큼은 잘라 내 힘이 1000에 묶인 뒤로는 선도 자라지 않는다.
@@ -65,12 +89,12 @@ struct AlkkagiScreen: View {
                 seats
                 GeometryReader { proxy in
                     AlkkagiBoardView(stones: displayedStones, flipped: flipped, pull: drawnPull, preview: previewPath,
-                                     highlight: grabbed, highlightSeat: displayedSeat ?? 0)
+                                     highlight: grabbed, highlightSeat: displayedSeat ?? 0,
+                                     homeShade: placingSeat.map { Alkkagi.homeRange(seat: $0) }, dragging: draggingDraft)
                         .contentShape(Rectangle())
                         .gesture(dragGesture(size: proxy.size))
                 }
                 .aspectRatio(1, contentMode: .fit)
-                .padding(.horizontal, 8)
                 actionBar
                 Spacer(minLength: 0)
             }
@@ -111,6 +135,11 @@ struct AlkkagiScreen: View {
             guard !isPlaying else { return }
             announceTurn()
         }
+        .onChange(of: placingSeat, initial: true) { _, seat in
+            // 내가 놓을 차례가 되면 기본 배치에서 시작한다 — 로컬 2인은 좌석이 넘어갈 때마다 다시 채운다.
+            guard let seat, seat == mySeat else { return }
+            draft = Alkkagi.defaultPlacement(seat: seat)
+        }
         .onChange(of: match.lastRemoteMove?.id) { _, _ in
             guard let remote = match.lastRemoteMove, let sim = match.state.lastSimulation else { return }
             // 튕긴 사람이 제 돌을 떨어뜨린 것은 세지 않는다 — 몇 개를 앗겼는지만 알린다.
@@ -125,24 +154,34 @@ struct AlkkagiScreen: View {
         .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await match.resync() } } }
     }
 
+    /// 머리글은 한 줄이다 — 판이 화면 폭과 높이를 최대한 쓰게 남은 자리를 줄인다.
     private var header: some View {
-        HStack {
+        HStack(spacing: 10) {
             Button(action: onReturn) { Image(systemName: "chevron.left").foregroundStyle(theme.ivory) }
                 .accessibilityIdentifier("header.menu").accessibilityLabel("메뉴로")
-            Spacer()
-            VStack(spacing: 2) {
-                Text("알까기").font(.system(.title3, design: .serif, weight: .semibold)).foregroundStyle(theme.ivory)
-                Text("내 돌 \(displayedRemaining(seat: mySeat)) · 상대 돌 \(displayedRemaining(seat: 1 - mySeat))")
-                    .font(.caption).monospacedDigit().foregroundStyle(theme.brass).accessibilityIdentifier("header.status")
-            }
-            Spacer()
-            Text(displayedSeat.map { "\(seatNames[$0]) 차례" } ?? "끝")
+            Text("알까기").font(.system(.headline, design: .serif, weight: .semibold)).foregroundStyle(theme.ivory)
+            Spacer(minLength: 4)
+            Text(statusText)
+                .font(.caption).monospacedDigit().foregroundStyle(theme.brass).accessibilityIdentifier("header.status")
+            Text(turnText)
                 .font(.caption).foregroundStyle(theme.ivory).accessibilityIdentifier("header.turn")
         }
+        .lineLimit(1)
         .padding(.horizontal, 16).padding(.top, 8)
     }
 
-    /// 명패 둘. 현재 차례는 황동, 원격 상대는 접속 점. 숫자는 그 좌석에 남은 돌이다.
+    /// 배치 중에는 남은 돌을 세어 봐야 소용이 없다 — 무엇을 하는 단계인지만 적는다.
+    private var statusText: String {
+        guard match.state.phase == .play else { return "배치 중" }
+        return "내 돌 \(displayedRemaining(seat: mySeat)) · 상대 돌 \(displayedRemaining(seat: 1 - mySeat))"
+    }
+
+    private var turnText: String {
+        guard let seat = displayedSeat else { return "끝" }
+        return match.state.phase == .setup ? "\(seatNames[seat]) 배치" : "\(seatNames[seat]) 차례"
+    }
+
+    /// 명패 둘. 한 줄 높이 28pt이고 현재 차례는 황동, 원격 상대는 접속 점. 숫자는 그 좌석에 남은 돌이다.
     private var seats: some View {
         HStack(spacing: 8) {
             ForEach(0..<2, id: \.self) { seat in
@@ -156,7 +195,7 @@ struct AlkkagiScreen: View {
                     Text("\(displayedRemaining(seat: seat))").font(.caption.weight(.semibold)).monospacedDigit()
                 }
                 .foregroundStyle(current ? theme.brassInk : theme.ink)
-                .frame(maxWidth: .infinity).padding(.vertical, 8)
+                .frame(maxWidth: .infinity, minHeight: 28)
                 .background(RoundedRectangle(cornerRadius: 8).fill(current ? theme.brass : theme.paper))
                 .accessibilityIdentifier("players.seat.\(seat)")
                 .accessibilityLabel("\(seatNames[seat]), 돌 \(displayedRemaining(seat: seat))개\(current ? ", 현재 차례" : "")")
@@ -175,15 +214,34 @@ struct AlkkagiScreen: View {
                     .buttonStyle(.plain).accessibilityIdentifier("alkkagi.back")
             }
             .paperCard(padding: 14).padding(.horizontal, 16)
+        } else if let placingSeat {
+            VStack(spacing: 8) {
+                Text(isMyPlacement ? "내 돌을 진영 안에 놓는다" : "\(seatNames[placingSeat])이(가) 돌을 놓는 중")
+                    .font(.caption).foregroundStyle(theme.ivory)
+                Button(action: placeDraft) { Text("배치 완료").frame(maxWidth: .infinity).brassButton(prominent: true) }
+                    .buttonStyle(.plain).disabled(!canPlace).accessibilityIdentifier("alkkagi.placeDone")
+            }
+            .padding(.horizontal, 16).padding(.bottom, 8)
         } else {
             Text(displayedSeat == mySeat ? "내 돌을 당겨 놓는다" : "\(seatNames[displayedSeat ?? 0])의 차례를 기다린다")
                 .font(.caption).foregroundStyle(theme.ivory).padding(.bottom, 8)
         }
     }
 
+    /// 내 차례이고 초안이 규칙에 맞을 때만 확정할 수 있다.
+    private var canPlace: Bool { isMyPlacement && Alkkagi.placementIsValid(myDraft, seat: mySeat) }
+
+    private func placeDraft() {
+        let points = myDraft
+        // 좌석이 넘어간 뒤에 눌린 늦은 탭은 규칙이 거절한다 — 화면은 그 사실만 알린다.
+        Task { if await match.play(.setup(points)) == false { showToast("지금은 놓을 수 없다") } }
+    }
+
+    /// 손끝이 하는 일은 단계가 가른다 — 배치에서는 초안의 돌을 옮기고, 튕길 때는 새총을 당긴다.
     private func dragGesture(size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
+                guard match.state.phase == .play else { return setupDragChanged(value, size: size) }
                 guard match.isLocalTurn, !isPlaying, let seat = Alkkagi.currentSeat(match.state) else { return }
                 if grabbed == nil {
                     grabbed = AlkkagiGeometry.stone(at: value.startLocation, stones: match.state.stones[seat], in: size, flipped: flipped)
@@ -192,6 +250,7 @@ struct AlkkagiScreen: View {
                 finger = AlkkagiGeometry.point(at: value.location, in: size, flipped: flipped)
             }
             .onEnded { value in
+                guard match.state.phase == .play else { return setupDragEnded(value, size: size) }
                 defer { grabbed = nil; finger = nil }
                 guard match.isLocalTurn, !isPlaying, let grabbed, let seat = Alkkagi.currentSeat(match.state),
                       let from = match.state.stones[seat][grabbed] else { return }
@@ -215,6 +274,28 @@ struct AlkkagiScreen: View {
                     announceTurn()
                 }
             }
+    }
+
+    /// 배치 중의 끌기. 내 초안의 돌을 잡아 손끝을 따라다니게 한다.
+    private func setupDragChanged(_ value: DragGesture.Value, size: CGSize) {
+        guard isMyPlacement else { return }
+        if grabbed == nil {
+            grabbed = AlkkagiGeometry.stone(at: value.startLocation, stones: myDraft.map { Optional($0) },
+                                            in: size, flipped: flipped)
+        }
+        guard grabbed != nil else { return }
+        finger = AlkkagiGeometry.point(at: value.location, in: size, flipped: flipped)
+    }
+
+    /// 놓는 순간 가장 가까운 교차점에 붙인다. 진영을 벗어나거나 다른 돌에 닿는 자리면 그 돌만 있던 자리로 되돌아간다.
+    private func setupDragEnded(_ value: DragGesture.Value, size: CGSize) {
+        defer { grabbed = nil; finger = nil }
+        guard isMyPlacement, let grabbed else { return }
+        let to = AlkkagiGeometry.snap(finger ?? AlkkagiGeometry.point(at: value.location, in: size, flipped: flipped))
+        var next = myDraft
+        next[grabbed] = to
+        guard Alkkagi.placementIsValid(next, seat: mySeat) else { return }
+        draft = next
     }
 
     private func resultText(_ outcome: Outcome) -> String {
@@ -263,6 +344,8 @@ struct AlkkagiScreen: View {
     /// 지금 차례를 배너로 알린다. 판이 끝났으면 알릴 차례가 없다.
     private func announceTurn() {
         guard match.outcome == nil, let seat = Alkkagi.currentSeat(match.state) else { return }
+        // 배치는 누가 놓을 차례인지가 전부라 온라인에서도 이름을 부른다.
+        guard match.state.phase == .play else { return showBanner("\(seatNames[seat]) 배치") }
         // 로컬 2인은 두 좌석 다 내 것이라 "내 차례"가 아무것도 알려주지 않는다. 이름을 부른다.
         showBanner(match.mode.isOnline && match.isLocalTurn ? "내 차례" : "\(seatNames[seat]) 차례")
     }

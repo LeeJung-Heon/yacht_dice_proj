@@ -23,6 +23,20 @@ struct AlkkagiGeometryTests {
         #expect(black.y > white.y)
     }
 
+    @Test("바깥 여백은 반 칸이라 판이 화면을 거의 다 쓴다")
+    func 여백() {
+        let u = AlkkagiGeometry.unit(in: size)
+        #expect(abs(u - size.width / 13000) < 0.0001)   // 12칸 + 여백 반 칸 둘 = 13칸
+        let corner = AlkkagiGeometry.project(P(x: 0, y: 0), in: size, flipped: false)
+        #expect(abs(corner.x - u * 500) < 0.5 && abs(corner.y - (size.height - u * 500)) < 0.5)
+    }
+
+    @Test("놓은 자리는 가장 가까운 교차점으로 붙고 판 안에 묶인다")
+    func 교차점_붙이기() {
+        #expect(AlkkagiGeometry.snap(P(x: 4499, y: 5501)) == P(x: 4000, y: 6000))
+        #expect(AlkkagiGeometry.snap(P(x: -300, y: 12800)) == P(x: 0, y: 12000))
+    }
+
     @Test("누른 자리의 돌을 찾는다")
     func 돌_찾기() {
         let stones = Alkkagi.standardStart().stones[0]
