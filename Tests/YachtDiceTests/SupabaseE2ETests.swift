@@ -335,6 +335,39 @@ struct SupabaseE2ETests {
         #expect(final.status == "finished" && final.winnerSeat == 0 && final.game == "cuppong")
     }
 
+    @Test("알까기 방을 만들고 들어가 아홉 수로 끝내면 winner_seat가 남는다")
+    func 알까기_한_판() async throws {
+        let host = SupabaseService(client: makeClient())
+        let guest = SupabaseService(client: makeClient())
+        await host.signIn(); await guest.signIn()
+        let hostUid = try #require(host.uid), guestUid = try #require(guest.uid)
+        let room = try await host.createRoom(name: "A", game: "alkkagi", player: nil)
+        let joined = try await guest.joinRoom(code: room.code, name: "B", player: nil)
+        let refreshed = try await host.fetchMatch(id: room.id)
+        let ta = SupabaseTurnTransport(client: host.client, matchID: room.id)
+        let tb = SupabaseTurnTransport(client: guest.client, matchID: room.id)
+        let a = OnlineMatch(game: Alkkagi.self, mode: .online(matchID: room.id.uuidString),
+                            participants: seatParticipants(localID: hostUid.uuidString, players: refreshed.seats(localUid: hostUid)),
+                            log: MoveLog<Alkkagi>(), transport: ta)
+        let b = OnlineMatch(game: Alkkagi.self, mode: .online(matchID: room.id.uuidString),
+                            participants: seatParticipants(localID: guestUid.uuidString, players: joined.seats(localUid: guestUid)),
+                            log: MoveLog<Alkkagi>(), transport: tb)
+        a.startListening(); b.startListening()
+        let deadline = ContinuousClock.now + .seconds(8)
+        while !(ta.isSubscribed && tb.isSubscribed), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(100)) }
+        for (i, flick) in AlkkagiMatchTests.winningMoves().enumerated() {
+            let mover = i % 2 == 0 ? a : b, other = i % 2 == 0 ? b : a
+            let ok = await mover.play(flick)
+            #expect(ok, "\(i)번째 수 \(flick) 실패: \(mover.lastTransportError ?? "")")
+            let d = ContinuousClock.now + .seconds(10)
+            while other.log.moves.count != mover.log.moves.count, ContinuousClock.now < d { try await Task.sleep(for: .milliseconds(50)) }
+            #expect(other.log.moves.count == mover.log.moves.count, "상대에게 수가 가지 않았다")
+        }
+        #expect(a.outcome == .win(seat: 0) && b.outcome == .win(seat: 0))
+        let final = try await host.fetchMatch(id: room.id)
+        #expect(final.status == "finished" && final.winnerSeat == 0 && final.game == "alkkagi")
+    }
+
     @Test("연결된 플레이어로만 방을 만들고 들어갈 수 있다")
     func 연결된_플레이어() async throws {
         let host = SupabaseService(client: makeClient())
