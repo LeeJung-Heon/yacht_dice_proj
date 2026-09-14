@@ -22,3 +22,6 @@ xcuserdata/
 * [0-9].md
 .*.icloud
 .superpowers/
+
+# Supabase CLI의 기기별 연결 정보
+supabase/.temp/

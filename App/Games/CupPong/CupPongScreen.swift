@@ -5,14 +5,16 @@ import GameCore
 /// 로컬 2인은 한 기기에서 좌석이 번갈아 넘어간다.
 struct CupPongScreen: View {
     let match: OnlineMatch<CupPong>
+    let service: SupabaseService
+    @State private var opponentDesign = CupPongCustomizationStore()
+    @State private var photoSyncMessage: String?
     var onReturn: () -> Void = {}
     @Environment(\.theme) private var theme
     @Environment(\.scenePhase) private var scenePhase
     /// 직전에 받은 끌기 표본. 속도는 이 표본과 새 표본 사이에서만 재므로 손을 멈춘 채 끌면 세기가 붙지 않는다.
     @State private var lastSample: (location: CGPoint, time: Date)?
-    /// 마지막 구간에서 잰 초당 이동 거리. 조준선과 놓기가 같은 값을 써야 미리 본 궤적대로 날아간다.
+    /// 마지막 구간에서 잰 초당 이동 거리. 놓을 때 던지는 힘에 반영한다.
     @State private var lastSpeed: CGFloat = 0
-    @State private var aim: CupPong.Landing?
     @State private var ball: (x: Int, y: Int, height: CGFloat)?
     @State private var vanishing: Int?
     @State private var isThrowing = false
@@ -43,7 +45,7 @@ struct CupPongScreen: View {
         // 세기는 화면 높이로 잰다(테이블 칸 높이가 아니다). 손을 멈춘 채 200~280pt쯤 끌면 컵 자리에 떨어진다.
         GeometryReader { screen in
             ZStack {
-                WoodBackground()
+                theme.cupPongBackdrop.ignoresSafeArea()
                 VStack(spacing: 10) {
                     header
                     seats
@@ -52,10 +54,15 @@ struct CupPongScreen: View {
                         Text("상대가 내 컵 \(match.state.remaining(seat: mySeat))개를 노린다")
                             .font(.caption).foregroundStyle(theme.brass).accessibilityIdentifier("cuppong.owner")
                     }
-                    CupPongTableView(cups: targetCups, owner: targetOwner, aim: aim, ball: displayedBall, vanishing: vanishing)
+                    CupPongTableView(cups: targetCups, owner: targetOwner, ball: displayedBall, vanishing: vanishing,
+                                     customization: match.mode.isOnline && 1 - shooter != mySeat ? opponentDesign : .shared)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .gesture(dragGesture(height: screen.size.height))
+                        .clipShape(RoundedRectangle(cornerRadius: 22))
                         .padding(.horizontal, 8)
+                    if let photoSyncMessage {
+                        Text(photoSyncMessage).font(.caption2).foregroundStyle(theme.ivory).padding(.horizontal, 16)
+                    }
                     actionBar
                 }
                 .overlay(alignment: .top) {
@@ -87,7 +94,8 @@ struct CupPongScreen: View {
                     vanishing.wrappedValue = nil
                 }
             }
-            .onDisappear { match.onRemoteMove = nil }
+            .task { await syncPhotos() }
+            .onDisappear { match.onRemoteMove = nil; disconnectTask?.cancel() }
             .onChange(of: match.log.moves.count, initial: true) { _, _ in
                 guard match.outcome == nil, let seat = CupPong.currentSeat(match.state) else { return }
                 if let last = match.state.lastShot, last.cup != nil {
@@ -108,6 +116,38 @@ struct CupPongScreen: View {
                 else { disconnectTask = Task { try? await Task.sleep(for: .seconds(3)); guard !Task.isCancelled else { return }; withAnimation { showDisconnected = true } } }
             }
             .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await match.resync() } } }
+        }
+    }
+
+    /// 상대의 사진 버전만 주기적으로 확인하고 바뀐 경우에만 이미지를 받는다.
+    private func syncPhotos() async {
+        guard case .online(let id) = match.mode, let matchID = UUID(uuidString: id) else { return }
+        let photos = CupPongPhotoService(service: service)
+        var lastRevision: UUID?
+        var published = false
+        while !Task.isCancelled {
+            do {
+                if !published { try await photos.publish(.shared); published = true }
+                let row = try await service.fetchMatch(id: matchID)
+                let owner = match.localSeat == 0 ? row.guestUid : row.hostUid
+                if let owner {
+                    let revision = try await photos.revision(owner: owner)
+                    if revision != lastRevision {
+                        if let design = try await photos.fetch(owner: owner) {
+                            let loaded = try photos.load(design)
+                            try Task.checkCancellation()
+                            opponentDesign = loaded
+                            lastRevision = design.revision
+                        } else {
+                            opponentDesign = CupPongCustomizationStore()
+                            lastRevision = nil
+                        }
+                    }
+                }
+                photoSyncMessage = nil
+            } catch is CancellationError { return }
+            catch { photoSyncMessage = "컵 사진을 동기화하지 못했습니다. 다시 연결하는 중…" }
+            do { try await Task.sleep(for: .seconds(10)) } catch { return }
         }
     }
 
@@ -178,17 +218,11 @@ struct CupPongScreen: View {
                     lastSpeed = moved / CGFloat(dt)
                 }
                 lastSample = (value.location, value.time)
-                let dx = value.location.x - value.startLocation.x, dy = value.startLocation.y - value.location.y
-                if let shot = CupPongGeometry.shot(dx: dx, dy: dy, speed: lastSpeed, screenHeight: height) {
-                    aim = CupPong.landing(of: shot, against: targetCups)
-                } else {
-                    aim = nil
-                }
             }
             .onEnded { value in
-                // 놓는 순간의 속도는 다시 재지 않는다. 조준선이 보여 준 그 세기 그대로 던져야 한다.
+                // 마지막 입력 표본의 속도를 사용한다. 놓기 전에는 착지점을 계산하거나 표시하지 않는다.
                 let speed = lastSpeed
-                defer { lastSample = nil; lastSpeed = 0; aim = nil }
+                defer { lastSample = nil; lastSpeed = 0 }
                 guard match.isLocalTurn, !isThrowing else { return }
                 let dx = value.location.x - value.startLocation.x, dy = value.startLocation.y - value.location.y
                 guard let shot = CupPongGeometry.shot(dx: dx, dy: dy, speed: speed, screenHeight: height) else { return }

@@ -22,7 +22,7 @@ struct YachtDiceApp: App {
                 case .playingOmok(let match):
                     OmokScreen(match: match, onReturn: { container.returnToMenu() })
                 case .playingCupPong(let match):
-                    CupPongScreen(match: match, onReturn: { container.returnToMenu() })
+                    CupPongScreen(match: match, service: container.supabase, onReturn: { container.returnToMenu() })
                 case .playingAlkkagi(let match):
                     AlkkagiScreen(match: match, onReturn: { container.returnToMenu() })
                 case .playing(let session):

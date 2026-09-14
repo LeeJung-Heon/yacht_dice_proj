@@ -18,7 +18,7 @@ iMessage 컵퐁처럼 상대 진영의 컵 10개를 번갈아 던져 먼저 비�
 | 재현 | `apply`가 사칙연산만으로 착지점과 맞힌 컵을 정한다(`sin`·`tan`·`sqrt`·난수 없음). 상대는 같은 수로 같은 궤적을 재생한다 |
 | 시점 | 화면은 항상 던지는 사람의 시점이다. 먼 쪽 삼각형이 지금 맞혀야 할 컵이고 상대 차례에는 상대의 수를 같은 시점에서 재생한다 |
 | 모드 | 온라인 대전과 로컬 2인. 컴퓨터 상대 없음 |
-| 그리기 | SwiftUI `Canvas` 2D 원근(나무 바닥·초록 테이블·중앙선·빨간 컵·공) |
+| 그리기 | RealityKit 실제 3D(나무 테두리·초록 테이블·속이 열린 빨간 컵·공), 컵별 사진 커스텀은 `2026-09-14-cuppong-3d-customization.md` |
 
 ## 3. 규칙 (`Packages/GameCore/Sources/GameCore/CupPong.swift`)
 
@@ -41,13 +41,13 @@ public enum CupPong: Game {
 - 맞힘: 상대 좌석의 남은 컵 중 `(X - cx)² + (L - cy)² < cupRadius²`인 첫 컵(인덱스 순)이다.
 - `canApply`: `nextSeat != nil`이고 `dx`·`power`가 범위 안이다.
 - `apply`: 착지를 계산해 `lastShot`에 적고, 맞혔으면 그 컵을 비우고 `nextSeat`를 유지하며 상대 컵이 모두 비면 `.win(seat)`, 빗나갔으면 `nextSeat = 1 - seat`.
-- 화면의 예상 궤적 점선과 공의 포물선 높이는 같은 상수로 그리되 규칙에는 없다(연출).
+- 예상 궤적 점선과 착지 표시는 없다. 실제 던진 공의 포물선 높이만 화면에서 연출한다.
 
 ## 4. 앱
 
 | 파일 | 책임 |
 |---|---|
-| `App/Games/CupPong/CupPongTableView.swift` | 원근 변환 `CupPongGeometry.project(x:y:)`(테이블 격자 → 화면 좌표, 먼 쪽이 좁아진다), 바닥·테이블·중앙선·컵·공·점선 그리기. 상태와 연출 값(공 위치·진행도, 흔들리는 컵)만 받는다 |
+| `App/Games/CupPong/CupPongTableView.swift` | `CupPongScene`의 실제 3D 테이블·컵·공을 `RealityView`에 연결한다. 컵 상태·실제 공 위치·소유자의 사진을 받는다 |
 | `App/Games/CupPong/CupPongScreen.swift` | 헤더(`header.menu`, 남은 컵 수 `header.status`), 명패 둘(`players.seat.<i>`, 접속 점), 스와이프 제스처 → `Shot` → `match.play`, 0.9초 공 애니메이션과 컵 소멸, 상대 수 재생(`onRemoteMove`), "한 번 더!"·차례 배너, 연결 띠, 결과 카드(`cuppong.result`, `cuppong.back`), `scenePhase` resync |
 | `App/Games/CupPong/CupPongMenu.swift` | 로컬 2인(이름 둘)·온라인(`OnlineMenu(container:game: .cuppong)`)·이어하기, `menu.cuppong.local`, `menu.cuppong.online`, `menu.cuppong.local.start`, `menu.back` |
 | `App/Games/GameCatalog.swift` | `cuppong.isAvailable = true` |
@@ -58,14 +58,14 @@ public enum CupPong: Game {
 ### 4.1 흐름
 
 1. 허브 → 컵퐁 타일 → 메뉴 → 로컬 2인 또는 온라인. 온라인 방 만들기·입장·열기는 P7과 같고 `row.game == "cuppong"`이면 `OnlineMatch<CupPong>`와 `CupPongScreen`이 열린다.
-2. 내 차례에 아래 중앙의 공을 위로 끌면 점선 궤적이 따라오고, 놓으면 끈 벡터를 `dx`(좌우, -1000…1000)·`power`(길이·속도, 0…1000)로 바꿔 `match.play(Shot)`을 부른다. 화면은 `state.lastShot`으로 공을 0.9초 날리고 컵을 맞혔으면 흔들다 지운 뒤 "한 번 더!" 또는 차례 배너를 보인다.
+2. 내 차례에 아래 중앙의 공을 위로 끌어 놓으면 끈 벡터를 `dx`(좌우, -1000…1000)·`power`(길이·속도, 0…1000)로 바꿔 `match.play(Shot)`을 부른다. 화면은 `state.lastShot`으로 공을 0.9초 날리고 컵을 맞혔으면 지운 뒤 "한 번 더!" 또는 차례 배너를 보인다.
 3. 상대 수는 `onRemoteMove`로 같은 애니메이션을 재생한다. 화면은 던지는 사람의 시점이라 먼 쪽 삼각형은 상대 차례에 내 컵이 되며, 명패 아래 한 줄(`cuppong.owner`)이 "상대가 내 컵 N개를 노린다"고 알리고 테이블의 접근성 라벨도 "내 컵 N개 남음"으로 뒤집힌다.
 4. 상대 컵이 모두 비면 `endMatch(winnerSeat)`가 나가고 결과 카드가 보이며 `records`가 갱신되어 `wins.cuppong`에 제출된다.
 5. 로컬 2인은 같은 화면에서 차례가 바뀔 때 "OO 차례" 배너로 기기를 넘긴다.
 
 ### 4.2 스와이프 → 수
 
-끌기 시작점에서 끝점까지의 벡터 `(vx, vy)`(위가 양수)와 놓기 직전 구간의 속도 `s`(마지막 두 표본 사이의 초당 이동 거리, 시간 간격은 1/120초에서 막는다)로 `power = clamp(길이 / 화면 높이 * 1400 * (1 + 0.15 * min(1, s / (화면 높이 * 4))), 0, 1000)`, `dx = clamp(vx / max(|vy|, 1) * 1000, -1000, 1000)`을 만든다. 세기는 끈 길이가 정하고 속도는 최대 15%만 얹으므로 화면 가운데를 향해 끈 손이 테이블 밖으로 넘어가지 않으며, 조준선과 놓기가 같은 속도 값을 쓰므로 미리 본 궤적 그대로 날아간다. 위로 끌지 않으면(`vy <= 0`) 던지지 않는다. 값은 정수로 반올림하여 그대로 수가 된다.
+끌기 시작점에서 끝점까지의 벡터 `(vx, vy)`(위가 양수)와 놓기 직전 구간의 속도 `s`(마지막 두 표본 사이의 초당 이동 거리, 시간 간격은 1/120초에서 막는다)로 `power = clamp(길이 / 화면 높이 * 1400 * (1 + 0.15 * min(1, s / (화면 높이 * 4))), 0, 1000)`, `dx = clamp(vx / max(|vy|, 1) * 1000, -1000, 1000)`을 만든다. 세기는 끈 길이가 정하고 속도는 최대 15%만 얹으므로 화면 가운데를 향해 끈 손이 테이블 밖으로 넘어가지 않으며, 예상 궤적을 표시하지 않고 놓을 때 마지막 속도 표본을 반영한다. 위로 끌지 않으면(`vy <= 0`) 던지지 않는다. 값은 정수로 반올림하여 그대로 수가 된다.
 
 ## 5. 테스트
 

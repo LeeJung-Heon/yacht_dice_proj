@@ -5,18 +5,6 @@ import GameCore
 
 @Suite("컵퐁 기하")
 struct CupPongGeometryTests {
-    let size = CGSize(width: 400, height: 600)
-
-    @Test("먼 쪽이 위이고 좁다")
-    func 원근() {
-        let near = CupPongGeometry.project(x: -1000, y: 0, in: size)
-        let far = CupPongGeometry.project(x: -1000, y: 3000, in: size)
-        #expect(far.y < near.y)
-        #expect(abs(far.x - size.width / 2) < abs(near.x - size.width / 2))
-        #expect(CupPongGeometry.project(x: 0, y: 1500, in: size).x == size.width / 2)
-        #expect(CupPongGeometry.scale(y: 3000, in: size) < CupPongGeometry.scale(y: 0, in: size))
-    }
-
     @Test("스와이프가 힘으로 바뀌고 범위를 지킨다")
     func 힘() throws {
         let straight = try #require(CupPongGeometry.shot(dx: 0, dy: 300, speed: 600, screenHeight: 600))

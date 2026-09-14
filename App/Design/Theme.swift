@@ -29,6 +29,9 @@ func contrastRatio(_ a: RGB, _ b: RGB) -> Double {
 struct ThemePalette: Sendable {
     let table, paper, paperLine, leather, ink, inkSecondary, brass, brassInk, success, ivory, pip: RGB
 
+    /// 컵퐁의 몰입형 화면은 시스템 모드와 무관하게 어두운 펠트 위에 밝은 글자를 쓴다.
+    static let cupPongBackdrop = RGB(hex: 0x092420)
+
     static let light = ThemePalette(
         table: RGB(hex: 0x5A3A22), paper: RGB(hex: 0xF4EDDC), paperLine: RGB(hex: 0xD8CDB4),
         leather: RGB(hex: 0x6B1E22), ink: RGB(hex: 0x1E1A17), inkSecondary: RGB(hex: 0x6E6255),
@@ -48,6 +51,8 @@ struct Theme: Sendable {
     let isDark: Bool
 
     var table: Color { palette.table.color }
+    var cupPongBackdrop: Color { ThemePalette.cupPongBackdrop.color }
+    var cupPongPaper: Color { ThemePalette.light.paper.color }
     var paper: Color { palette.paper.color }
     var paperLine: Color { palette.paperLine.color }
     var leather: Color { palette.leather.color }

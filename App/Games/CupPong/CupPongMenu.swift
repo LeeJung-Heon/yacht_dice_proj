@@ -6,6 +6,7 @@ struct CupPongMenu: View {
     @State private var names = ["나", "상대"]
     @State private var showingLocalSetup = false
     @State private var showingOnline = false
+    @State private var showingCustomization = false
 
     var body: some View {
         NavigationStack {
@@ -17,6 +18,9 @@ struct CupPongMenu: View {
                             Text("컵퐁").font(.system(.largeTitle, design: .serif, weight: .semibold)).foregroundStyle(theme.ivory)
                             Text("컵 열 개 · 넣으면 한 번 더").font(.caption.weight(.semibold)).tracking(2).foregroundStyle(theme.brass)
                         }.padding(.top, 8).padding(.bottom, 10)
+                        ModeCard(icon: "photo.on.rectangle.angled", title: "나만의 컵", subtitle: "컵마다 사진을 넣고 친구와 공유한다", identifier: "menu.cuppong.customize") {
+                            showingCustomization = true
+                        }
                         if let saved = container.savedRecord, saved.game == "cuppong" {
                             ModeCard(icon: "bookmark.fill", title: "이어하기", subtitle: saved.mode.title, identifier: "menu.resume") {
                                 container.resumeSavedGame()
@@ -39,6 +43,7 @@ struct CupPongMenu: View {
             }
             .toolbarBackground(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $showingOnline) { OnlineMenu(container: container, game: .cuppong) }
+            .sheet(isPresented: $showingCustomization) { CupPongCustomizationView(service: container.supabase) }
             .sheet(isPresented: $showingLocalSetup) {
                 NavigationStack {
                     Form {
