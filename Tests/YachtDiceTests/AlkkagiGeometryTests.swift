@@ -13,7 +13,7 @@ struct AlkkagiGeometryTests {
         for p in [P(x: 0, y: 0), P(x: 12000, y: 12000), P(x: 4000, y: 2000), P(x: 6500, y: 9100)] {
             let s = AlkkagiGeometry.project(p, in: size, flipped: false)
             let back = AlkkagiGeometry.point(at: s, in: size, flipped: false)
-            #expect(abs(back.x - p.x) <= 40 && abs(back.y - p.y) <= 40, "\(p) → \(back)")
+            #expect(abs(back.x - p.x) <= 2 && abs(back.y - p.y) <= 2, "\(p) → \(back)")
             let f = AlkkagiGeometry.project(p, in: size, flipped: true)
             #expect(abs((f.x + s.x) - size.width) < 0.5 && abs((f.y + s.y) - size.height) < 0.5)
         }
@@ -30,6 +30,9 @@ struct AlkkagiGeometryTests {
         #expect(AlkkagiGeometry.stone(at: on, stones: stones, in: size, flipped: false) == 1)
         let off = AlkkagiGeometry.project(P(x: 5000, y: 5000), in: size, flipped: false)
         #expect(AlkkagiGeometry.stone(at: off, stones: stones, in: size, flipped: false) == nil)
+        // 돌 1(5000)과 돌 2(6000) 사이지만 2에 더 가깝다 — 먼저 걸린 돌이 아니라 가까운 돌이 와야 한다
+        let between = AlkkagiGeometry.project(P(x: 5505, y: 2000), in: size, flipped: false)
+        #expect(AlkkagiGeometry.stone(at: between, stones: stones, in: size, flipped: false) == 2)
     }
 
     @Test("당김 → 힘: 반대 방향, 길이 비례, 범위와 최소 길이")

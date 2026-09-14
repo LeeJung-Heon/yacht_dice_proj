@@ -5,10 +5,12 @@ import GameCore
 struct AlkkagiBoardView: View {
     let stones: [[Alkkagi.Point?]]
     var flipped = false
-    var pull: (from: Alkkagi.Point, to: Alkkagi.Point)?
+    /// 그릴 당김. `clamped`면 최대까지 당긴 것이라 선이 더 자라지 않는다.
+    var pull: (from: Alkkagi.Point, to: Alkkagi.Point, clamped: Bool)?
     var preview: [Alkkagi.Point] = []
     var highlight: Int?
     var highlightSeat = 0
+    private static let brass = Color(red: 0.72, green: 0.53, blue: 0.17)
 
     var body: some View {
         Canvas { context, size in
@@ -49,7 +51,7 @@ struct AlkkagiBoardView: View {
                         Gradient(colors: black ? [Color(white: 0.35), .black] : [.white, Color(white: 0.78)]),
                         center: CGPoint(x: c.x - r * 0.35, y: c.y - r * 0.35), startRadius: 0, endRadius: r * 1.4))
                     if highlight == i && highlightSeat == seat {
-                        context.stroke(Path(ellipseIn: rect.insetBy(dx: -3, dy: -3)), with: .color(Color(red: 0.72, green: 0.53, blue: 0.17)), lineWidth: 2)
+                        context.stroke(Path(ellipseIn: rect.insetBy(dx: -3, dy: -3)), with: .color(Self.brass), lineWidth: 2)
                     }
                 }
             }
@@ -57,13 +59,14 @@ struct AlkkagiBoardView: View {
                 let from = AlkkagiGeometry.project(pull.from, in: size, flipped: flipped)
                 let to = AlkkagiGeometry.project(pull.to, in: size, flipped: flipped)
                 var line = Path(); line.move(to: from); line.addLine(to: to)
-                context.stroke(line, with: .color(.white.opacity(0.9)), lineWidth: 2)
+                // 최대까지 당기면 선이 황동으로 물들어, 더 끌어도 힘이 늘지 않는다고 알린다.
+                context.stroke(line, with: .color(pull.clamped ? Self.brass : .white.opacity(0.9)), lineWidth: 2)
                 // 화살표: 돌에서 당김 반대 방향으로
                 let dx = from.x - to.x, dy = from.y - to.y
                 let len = max(1, (dx * dx + dy * dy).squareRoot())
                 let tip = CGPoint(x: from.x + dx / len * r * 2.2, y: from.y + dy / len * r * 2.2)
                 var arrow = Path(); arrow.move(to: from); arrow.addLine(to: tip)
-                context.stroke(arrow, with: .color(Color(red: 0.72, green: 0.53, blue: 0.17)), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                context.stroke(arrow, with: .color(Self.brass), style: StrokeStyle(lineWidth: 3, lineCap: .round))
             }
         }
         .aspectRatio(1, contentMode: .fit)

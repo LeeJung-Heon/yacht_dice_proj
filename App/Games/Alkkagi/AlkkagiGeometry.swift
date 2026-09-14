@@ -22,6 +22,7 @@ enum AlkkagiGeometry {
 
     static func point(at s: CGPoint, in size: CGSize, flipped: Bool) -> Alkkagi.Point {
         let u = unit(in: size)
+        guard u > 0 else { return Alkkagi.Point(x: 0, y: 0) }   // 크기를 아직 못 받은 판에서는 나눌 것이 없다
         let side = min(size.width, size.height)
         let ox = (size.width - side) / 2, oy = (size.height - side) / 2
         var sx = s.x, sy = s.y
@@ -33,13 +34,23 @@ enum AlkkagiGeometry {
 
     static func stoneRadius(in size: CGSize) -> CGFloat { CGFloat(Alkkagi.stoneRadius) * unit(in: size) }
 
+    /// 여유 안에 든 돌 가운데 가장 가까운 것을 잡는다. 붙어 선 두 돌 사이를 눌러도 손끝에 가까운 쪽이 온다.
     static func stone(at s: CGPoint, stones: [Alkkagi.Point?], in size: CGSize, flipped: Bool) -> Int? {
         let r = stoneRadius(in: size) * 1.3     // 손가락 여유
-        return stones.indices.first { i in
-            guard let p = stones[i] else { return false }
+        return stones.indices.compactMap { i -> (index: Int, d2: CGFloat)? in
+            guard let p = stones[i] else { return nil }
             let c = project(p, in: size, flipped: flipped)
-            return (c.x - s.x) * (c.x - s.x) + (c.y - s.y) * (c.y - s.y) <= r * r
-        }
+            let d2 = (c.x - s.x) * (c.x - s.x) + (c.y - s.y) * (c.y - s.y)
+            return d2 <= r * r ? (i, d2) : nil
+        }.min { $0.d2 < $1.d2 }?.index
+    }
+
+    /// 최대 당김을 넘긴 손가락을 그 방향의 끝점으로 줄인다. 힘이 1000에 묶인 뒤에도 선만 자라면 더 셀 것처럼 보인다.
+    static func clampPull(from origin: Alkkagi.Point, to finger: Alkkagi.Point) -> Alkkagi.Point {
+        let gx = finger.x - origin.x, gy = finger.y - origin.y
+        let len = Alkkagi.isqrt(gx * gx + gy * gy)
+        guard len > maxPull else { return finger }
+        return Alkkagi.Point(x: origin.x + gx * maxPull / len, y: origin.y + gy * maxPull / len)
     }
 
     /// 돌에서 손가락까지의 격자 벡터가 당김이다. 힘은 반대 방향으로, 길이에 비례한다.
