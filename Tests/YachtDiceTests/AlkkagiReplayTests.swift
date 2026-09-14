@@ -6,7 +6,7 @@ import GameCore
 struct AlkkagiReplayTests {
     /// 흑 돌 0을 정면으로 튕겨 백 돌 0을 맞히고 판 밖으로 밀어내는, 충돌과 낙하가 다 있는 한 수.
     private func 한판(power: Int = 1000) -> Alkkagi.Simulation {
-        Alkkagi.simulate(Alkkagi.initial(), Alkkagi.Flick(stone: 0, dx: 0, dy: 1000, power: power))
+        Alkkagi.simulate(Alkkagi.standardStart(), Alkkagi.Flick(stone: 0, dx: 0, dy: 1000, power: power))
     }
 
     /// 프레임을 처음부터 끝까지 돌며 각 사건이 몇 번째 프레임에서 나왔는지 모은다.

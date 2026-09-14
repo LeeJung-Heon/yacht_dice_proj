@@ -25,7 +25,7 @@ struct AlkkagiGeometryTests {
 
     @Test("누른 자리의 돌을 찾는다")
     func 돌_찾기() {
-        let stones = Alkkagi.initial().stones[0]
+        let stones = Alkkagi.standardStart().stones[0]
         let on = AlkkagiGeometry.project(P(x: 5000, y: 2000), in: size, flipped: false)
         #expect(AlkkagiGeometry.stone(at: on, stones: stones, in: size, flipped: false) == 1)
         let off = AlkkagiGeometry.project(P(x: 5000, y: 5000), in: size, flipped: false)

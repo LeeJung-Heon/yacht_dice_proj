@@ -148,7 +148,9 @@ struct AppContainerTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         container.startAlkkagiLocal(names: ["갑", "을"])
         guard case .playingAlkkagi(let match) = container.status else { Issue.record("알까기가 아니다"); return }
-        let ok = await match.play(Alkkagi.Flick(stone: 0, dx: 0, dy: 1000, power: 1000)); #expect(ok)
+        // 배치 두 수를 먼저 두어야 튕길 수 있다.
+        for seat in 0..<2 { let 배치 = await match.play(.setup(Alkkagi.defaultPlacement(seat: seat))); #expect(배치, "\(seat) 배치") }
+        let ok = await match.play(.flick(Alkkagi.Flick(stone: 0, dx: 0, dy: 1000, power: 1000))); #expect(ok)
         let saved = try #require(MatchStore(directory: dir).load())
         #expect(saved.game == "alkkagi" && saved.mode == .passAndPlay(names: ["갑", "을"]))
         container.returnToMenu()

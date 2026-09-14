@@ -95,8 +95,9 @@ struct AlkkagiScreen: View {
         // 훅이 match를 강하게 담으면 match → onRemoteMove → match 고리가 되어, 판을 떠나도 세션이 살아남는다.
         .task { [weak match, playing = $playing, isPlaying = $isPlaying, replayingSeat = $replayingSeat] in
             guard let match else { return }
-            match.onRemoteMove = { [weak match] flick, _ in
-                guard let match else { return }
+            match.onRemoteMove = { [weak match] move, _ in
+                // 배치는 재생할 움직임이 없다 — 판에 돌이 놓인 것은 상태가 바뀌며 그대로 그려진다.
+                guard let match, case .flick(let flick) = move else { return }
                 // 훅은 수가 로그에 붙기 전에 불리므로 여기의 state는 수 전 배치다 — apply와 같은 재생이 나오고 좌석도 튕긴 쪽이다.
                 let seat = Alkkagi.currentSeat(match.state) ?? 0
                 let sim = Alkkagi.simulate(match.state, flick)
@@ -207,7 +208,7 @@ struct AlkkagiScreen: View {
                 Task {
                     async let animation: Void = Self.replay(sim, seat: seat, playing: $playing, isPlaying: $isPlaying,
                                                             replayingSeat: $replayingSeat)
-                    let played = await match.play(flick)
+                    let played = await match.play(.flick(flick))
                     if !played { showToast("지금은 튕길 수 없다") }
                     await animation
                     // 돌이 멎은 뒤에 다음 차례를 알린다 — 로그가 붙던 때는 재생 중이라 배너를 미뤘다.

@@ -13,9 +13,10 @@
 
 | 항목 | 결정 |
 |---|---|
-| 판·돌 | 13줄 판(줄 간격 1000, 좌표 `0…12000`), 돌 반지름 400, 좌석당 5개. 좌석 0(흑)은 `y = 2000`, 좌석 1(백)은 `y = 10000`, x는 `4000, 5000, 6000, 7000, 8000` |
-| 규칙 | 좌석 0 선, 턴마다 한 번 튕기고 결과와 상관없이 차례가 넘어간다. 중심이 판 밖으로 400 넘게 나간 돌은 누구 것이든 사라진다. 상대 돌이 0이면 승리, 한 튕김에 양쪽 마지막 돌이 함께 떨어지면 무승부, 내 돌만 0이 되면 상대 승리 |
-| 수 | `Flick { stone: 0…4, dx: -1000…1000, dy: -1000…1000 (둘 다 0 불가), power: 1…1000 }`. 힌트 미사용 |
+| 판·돌 | 13줄 판(줄 간격 1000, 좌표 `0…12000`), 돌 반지름 400, 좌석당 5개. 기본 배치는 좌석 0(흑)이 `y = 2000`, 좌석 1(백)이 `y = 10000`이고 x는 둘 다 `4000, 5000, 6000, 7000, 8000` |
+| 배치 | 판은 돌 하나 없이 열리고 좌석 0이 먼저, 그다음 좌석 1이 제 진영에 돌 다섯을 한 수로 놓는다. 진영은 좌석 0이 `y ∈ 0…5000`, 좌석 1이 `y ∈ 7000…12000`이며 x는 둘 다 `0…12000`이다. 자리는 교차점(1000의 배수)이고 돌끼리 중심 거리 제곱이 `800²` 이상이라 놓자마자 닿는 일은 없다. 둘 다 놓으면 좌석 0부터 튕긴다 |
+| 규칙 | 배치가 끝나면 좌석 0 선, 턴마다 한 번 튕기고 결과와 상관없이 차례가 넘어간다. 중심이 판 밖으로 400 넘게 나간 돌은 누구 것이든 사라진다. 상대 돌이 0이면 승리, 한 튕김에 양쪽 마지막 돌이 함께 떨어지면 무승부, 내 돌만 0이 되면 상대 승리 |
+| 수 | `Move { setup([Point]) \| flick(Flick) }`이고 `Flick { stone: 0…4, dx: -1000…1000, dy: -1000…1000 (둘 다 0 불가), power: 1…1000 }`이다. 배치도 수라 로그에 그대로 남고 상대에게도 같은 길로 간다. 힌트 미사용 |
 | 재현 | 1/120초 고정 간격 정수 시뮬레이션(사칙연산과 정수 제곱근만). 최대 600스텝. 4스텝마다 프레임을 기록해 30fps 재생 목록을 돌려준다 |
 | 입력 | 새총식: 내 돌을 누른 채 끌면 당김 선과 화살표, 놓으면 끈 반대 방향으로 끈 길이(최대 돌 지름의 4배 = 3200)에 비례한 힘 |
 | 시점 | 판은 뒤집지 않되 온라인의 좌석 1은 180° 돌려 내 돌이 아래에 오게 한다. 로컬 2인은 그대로 둔다 |
@@ -29,7 +30,9 @@ public enum Alkkagi: Game {
     public static let lines = 13, spacing = 1000, boardMax = 12000, stoneRadius = 400, stonesPerSeat = 5
     public static let stepsPerSecond = 120, maxSteps = 600, frameEvery = 4
     public struct Point: Codable, Equatable, Sendable { public var x: Int; public var y: Int }
-    public struct Flick: Codable, Equatable, Sendable { public let stone: Int; public let dx: Int; public let dy: Int; public let power: Int }   // Move
+    public struct Flick: Codable, Equatable, Sendable { public let stone: Int; public let dx: Int; public let dy: Int; public let power: Int }
+    public enum Move: Codable, Equatable, Sendable { case setup([Point]); case flick(Flick) }   // Codable은 합성한다
+    public enum Phase: Codable, Equatable, Sendable { case setup, play }
     public struct Frame: Equatable, Sendable { public let stones: [[Point?]] }        // [좌석][돌]
     public struct StoneRef: Equatable, Sendable { public let seat: Int; public let stone: Int }
     public struct Event: Equatable, Sendable {
@@ -39,12 +42,19 @@ public enum Alkkagi: Game {
     }
     public struct Simulation: Equatable, Sendable { public let frames: [Frame]; public let events: [Event]; public let final: [[Point?]]; public let steps: Int }
     public struct State: Codable, Equatable, Sendable {
-        public var stones: [[Point?]]          // 떨어진 돌은 nil
+        public var stones: [[Point?]]          // 아직 놓지 않은 돌과 떨어진 돌은 nil
+        public var placed: [Bool]              // 좌석이 배치를 마쳤는지
         public var nextSeat: Int?
         public var outcome: Outcome?
         public var lastSimulation: Simulation?  // Codable에서 제외한다(재생용, 상태는 수에서 다시 만든다)
-        public func remaining(seat: Int) -> Int
+        public var phase: Phase { placed.allSatisfy { $0 } ? .play : .setup }
+        public func remaining(seat: Int) -> Int   // 놓기 전에는 0이다
     }
+    public static func initial() -> State                                       // 돌이 없고 placed는 [false, false], nextSeat 0
+    public static func homeRange(seat: Int) -> ClosedRange<Int>                 // 0…5000 / 7000…12000
+    public static func defaultPlacement(seat: Int) -> [Point]                   // 손대지 않으면 놓이는 한 줄
+    public static func placementIsValid(_ points: [Point], seat: Int) -> Bool
+    public static func standardStart() -> State                                 // 두 기본 배치를 적용한 판(테스트·미리보기용)
     public static func simulate(_ state: State, _ flick: Flick) -> Simulation   // 순수 함수. 화면의 예상 궤적과 재생도 이것을 쓴다
 }
 ```
@@ -54,9 +64,11 @@ public enum Alkkagi: Game {
 - **충돌**: 서로 다른 두 돌의 중심 거리 제곱이 `800²` 미만이면 법선 `n = (bx - ax, by - ay)`, `d = isqrt(n·n)`(0이면 `(1000, 0)`)이고 단위 법선 성분은 `nx = n.x * 1000 / d`, `ny = n.y * 1000 / d`다. 법선 속도 `van = (vax * nx + vay * ny) / 1000`, `vbn`도 같고, `van - vbn > 0`(접근 중)일 때만 반발 9/10로 교환한다: `van' = (van + vbn) / 2 + 9 * (vbn - van) / 20`, `vbn' = (van + vbn) / 2 + 9 * (van - vbn) / 20`이며 접선 성분은 그대로 두어 `va += n̂ * (van' - van)`, `vb += n̂ * (vbn' - vbn)`. 겹침 `800 - d`는 양쪽에 절반씩 법선 방향으로 밀어 뗀다. 한 스텝에서 모든 쌍을 인덱스 순으로 한 번씩 본다.
 - **낙하**: 스텝 끝에 중심이 `x < -400`, `x > 12400`, `y < -400`, `y > 12400` 중 하나면 그 돌을 nil로 두고 `dropped` 이벤트를 남긴다.
 - **종료**: 모든 남은 돌의 속력이 0이거나 600스텝에 이르면 끝낸다. 4스텝마다(0, 4, 8, …)와 마지막 스텝의 배치를 `frames`에 넣는다.
-- `canApply`: `nextSeat != nil`, `stone` 범위 안이고 그 좌석의 돌이 남아 있으며, `dx`·`dy`가 범위 안이고 둘 다 0이 아니며, `power`가 1…1000이다.
-- `apply`: `simulate`로 `final`을 얻어 `stones`에 넣고 `lastSimulation`에 두며, 상대 돌이 0이고 내 돌이 남았으면 `.win(seat)`, 둘 다 0이면 `.draw`, 내 돌만 0이면 `.win(1 - seat)`, 아니면 `nextSeat = 1 - seat`.
-- `State`의 `Codable`은 `stones`·`nextSeat`·`outcome`만 다룬다(`lastSimulation`은 제외). `MoveLog`는 수만 저장한다.
+- **배치 검증**(`placementIsValid`): 점이 정확히 다섯이고, 각 점의 `x`가 `0…12000`, `y`가 그 좌석의 `homeRange` 안이며, 두 좌표가 모두 1000의 배수(교차점)이고, 어느 두 점의 중심 거리 제곱도 `800²` 이상이다.
+- **배치 순서**: `phase`는 두 좌석이 다 놓기 전까지 `.setup`이다. `canApply(.setup)`은 `phase == .setup`이고 `nextSeat`가 그 좌석이며 아직 놓지 않았고 배치가 검증을 지날 때 참이다. `apply(.setup)`은 `stones[seat]`에 점들을 넣고 `placed[seat]`를 참으로 하며, 남은 좌석이 있으면 `nextSeat = 1 - seat`, 둘 다 놓았으면 `nextSeat = 0`으로 두어 좌석 0부터 튕긴다.
+- `canApply(.flick)`: `phase == .play`이고 `nextSeat != nil`, `stone`이 범위 안이고 그 좌석의 돌이 남아 있으며, `dx`·`dy`가 범위 안이고 둘 다 0이 아니며, `power`가 1…1000이다.
+- `apply(.flick)`: `simulate`로 `final`을 얻어 `stones`에 넣고 `lastSimulation`에 두며, 상대 돌이 0이고 내 돌이 남았으면 `.win(seat)`, 둘 다 0이면 `.draw`, 내 돌만 0이면 `.win(1 - seat)`, 아니면 `nextSeat = 1 - seat`.
+- `State`의 `Codable`은 `stones`·`placed`·`nextSeat`·`outcome`만 다룬다(`lastSimulation`은 제외). `MoveLog`는 수만 저장하므로 로그 하나에 배치 두 수가 먼저 오고 튕김이 뒤따른다.
 
 ## 4. 앱
 
@@ -86,7 +98,7 @@ public enum Alkkagi: Game {
 
 | 대상 | 테스트 |
 |---|---|
-| `Alkkagi` 단위 | 초기 배치; 같은 수는 같은 `Simulation`(결정성); 직진 튕김이 마찰로 멈추는 거리와 프레임 수; 정면 충돌에서 맞은 돌이 법선 방향으로 움직이고 친 돌이 느려진다; 세게 치면 상대 돌이 떨어져 nil이 되고 `dropped` 이벤트가 난다; 내 돌만 판 밖으로 나가면 내 돌만 준다; 마지막 돌을 떨어뜨리면 `.win`, 함께 떨어지면 `.draw`; 600스텝 상한; `canApply`가 남의 돌·범위 밖·`power 0`을 거부; 로그 왕복(`lastSimulation` 제외) |
+| `Alkkagi` 단위 | 판이 열리면 돌이 없고 좌석 0부터 놓는다; 배치 검증(개수·진영·교차점·거리·남의 진영·두 번 놓기); 배치 순서와 배치 전 튕김 거부; `standardStart()`가 기본 한 줄과 같다; 같은 수는 같은 `Simulation`(결정성); 직진 튕김이 마찰로 멈추는 거리와 프레임 수; 정면 충돌에서 맞은 돌이 법선 방향으로 움직이고 친 돌이 느려진다; 세게 치면 상대 돌이 떨어져 nil이 되고 `dropped` 이벤트가 난다; 내 돌만 판 밖으로 나가면 내 돌만 준다; 마지막 돌을 떨어뜨리면 `.win`, 함께 떨어지면 `.draw`; 600스텝 상한; `canApply`가 남의 돌·범위 밖·`power 0`을 거부; 로그 왕복(`lastSimulation` 제외) |
 | 기하 단위 | `project`/`point` 왕복과 뒤집기 대칭, 끌기 → `Flick` 범위와 방향 반전, 짧은 끌기 nil |
 | `OnlineMatch<Alkkagi>` | 메모리 쌍으로 수 전파·재생·완주 |
 | 서버 통합 | `game = 'alkkagi'` 방에서 정해진 수 목록으로 끝까지 가 `winner_seat` |

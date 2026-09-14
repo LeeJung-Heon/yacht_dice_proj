@@ -1,7 +1,7 @@
 import Foundation
 
-/// 알까기. 13줄 판에서 돌 다섯을 번갈아 튕겨 상대 돌을 판 밖으로 밀어낸다.
-/// 수는 튕긴 힘뿐이고, 움직임은 1/120초 정수 시뮬레이션이라 어느 기기에서나 같다.
+/// 알까기. 각자 제 진영에 돌 다섯을 놓은 다음, 13줄 판에서 번갈아 튕겨 상대 돌을 판 밖으로 밀어낸다.
+/// 수는 배치 한 번과 튕긴 힘이고, 움직임은 1/120초 정수 시뮬레이션이라 어느 기기에서나 같다.
 public enum Alkkagi: Game {
     public static let id = "alkkagi"
     public static let displayName = "알까기"
@@ -36,6 +36,15 @@ public enum Alkkagi: Game {
         public init(stone: Int, dx: Int, dy: Int, power: Int) { self.stone = stone; self.dx = dx; self.dy = dy; self.power = power }
     }
 
+    /// 한 수. 판이 열리면 좌석마다 배치를 한 번 두고, 그다음부터는 튕김만 둔다.
+    public enum Move: Codable, Equatable, Sendable {
+        case setup([Point])
+        case flick(Flick)
+    }
+
+    /// 판의 단계. 두 좌석이 다 놓기 전까지가 배치다.
+    public enum Phase: Codable, Equatable, Sendable { case setup, play }
+
     public struct StoneRef: Equatable, Sendable {
         public let seat: Int
         public let stone: Int
@@ -66,23 +75,30 @@ public enum Alkkagi: Game {
     }
 
     public struct State: Codable, Equatable, Sendable {
-        /// stones[좌석][돌]. 떨어진 돌은 nil.
+        /// stones[좌석][돌]. 아직 놓지 않은 돌과 떨어진 돌은 nil.
         public var stones: [[Point?]]
+        /// 좌석이 배치를 마쳤는지. 둘 다 참이면 튕기기가 시작된다.
+        public var placed: [Bool]
         public var nextSeat: Int?
         public var outcome: Outcome?
         /// 마지막 수의 재생. 저장·전송에는 넣지 않는다 — 수에서 다시 만든다.
         public var lastSimulation: Simulation?
 
-        public init(stones: [[Point?]], nextSeat: Int?, outcome: Outcome?) {
-            self.stones = stones; self.nextSeat = nextSeat; self.outcome = outcome; self.lastSimulation = nil
+        /// 두 좌석이 다 놓았으면 튕기는 단계다.
+        public var phase: Phase { placed.allSatisfy { $0 } ? .play : .setup }
+
+        public init(stones: [[Point?]], placed: [Bool] = [true, true], nextSeat: Int?, outcome: Outcome?) {
+            self.stones = stones; self.placed = placed; self.nextSeat = nextSeat; self.outcome = outcome
+            self.lastSimulation = nil
         }
 
-        enum CodingKeys: String, CodingKey { case stones, nextSeat, outcome }
+        enum CodingKeys: String, CodingKey { case stones, placed, nextSeat, outcome }
 
         /// 재생은 수에서 다시 만드는 것이라 디코드한 상태에는 담기지 않는다.
         public init(from decoder: any Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             self.init(stones: try container.decode([[Point?]].self, forKey: .stones),
+                      placed: try container.decode([Bool].self, forKey: .placed),
                       nextSeat: try container.decodeIfPresent(Int.self, forKey: .nextSeat),
                       outcome: try container.decodeIfPresent(Outcome.self, forKey: .outcome))
         }
@@ -90,6 +106,7 @@ public enum Alkkagi: Game {
         public func encode(to encoder: any Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encode(stones, forKey: .stones)
+            try container.encode(placed, forKey: .placed)
             try container.encodeIfPresent(nextSeat, forKey: .nextSeat)
             try container.encodeIfPresent(outcome, forKey: .outcome)
         }
@@ -97,27 +114,84 @@ public enum Alkkagi: Game {
         public func remaining(seat: Int) -> Int { stones[seat].compactMap { $0 }.count }
     }
 
+    /// 판은 돌 하나 없이 열리고, 좌석 0이 먼저 놓는다.
     public static func initial() -> State {
-        let xs = (0..<stonesPerSeat).map { 4000 + $0 * spacing }
-        return State(stones: [xs.map { Point(x: $0, y: 2000) }, xs.map { Point(x: $0, y: 10000) }], nextSeat: 0, outcome: nil)
+        let empty = [Point?](repeating: nil, count: stonesPerSeat)
+        return State(stones: [empty, empty], placed: [false, false], nextSeat: 0, outcome: nil)
     }
 
-    public static func canApply(_ move: Flick, to state: State) -> Bool {
-        guard let seat = state.nextSeat, (0..<stonesPerSeat).contains(move.stone), state.stones[seat][move.stone] != nil else { return false }
-        guard (-1000...1000).contains(move.dx), (-1000...1000).contains(move.dy), move.dx != 0 || move.dy != 0 else { return false }
-        return (1...1000).contains(move.power)
+    /// 좌석의 진영. 가운데 줄(`y = 6000`)은 어느 쪽도 쓰지 못해 두 진영이 2000 떨어진다.
+    public static func homeRange(seat: Int) -> ClosedRange<Int> { seat == 0 ? 0...5000 : 7000...12000 }
+
+    /// 손대지 않으면 놓이는 한 줄.
+    public static func defaultPlacement(seat: Int) -> [Point] {
+        let y = seat == 0 ? 2000 : 10000
+        return (0..<stonesPerSeat).map { Point(x: 4000 + $0 * spacing, y: y) }
     }
 
-    public static func apply(_ move: Flick, to state: State) -> State {
+    /// 돌 다섯이 모두 제 진영의 교차점에 있고 서로 닿지 않아야 배치다.
+    public static func placementIsValid(_ points: [Point], seat: Int) -> Bool {
+        guard points.count == stonesPerSeat else { return false }
+        let home = homeRange(seat: seat)
+        for p in points {
+            guard (0...boardMax).contains(p.x), home.contains(p.y) else { return false }
+            guard p.x % spacing == 0, p.y % spacing == 0 else { return false }
+        }
+        for (i, a) in points.enumerated() {
+            for b in points[(i + 1)...] {
+                let dx = b.x - a.x, dy = b.y - a.y
+                guard dx * dx + dy * dy >= contact * contact else { return false }
+            }
+        }
+        return true
+    }
+
+    /// 두 기본 배치를 놓은 판. 테스트와 미리보기가 배치를 건너뛰고 쓴다.
+    public static func standardStart() -> State {
+        var state = initial()
+        for seat in 0..<seatCount { state = apply(.setup(defaultPlacement(seat: seat)), to: state) }
+        return state
+    }
+
+    public static func canApply(_ move: Move, to state: State) -> Bool {
+        guard let seat = state.nextSeat else { return false }
+        switch move {
+        case .setup(let points):
+            guard state.phase == .setup, !state.placed[seat] else { return false }
+            return placementIsValid(points, seat: seat)
+        case .flick(let flick):
+            guard state.phase == .play else { return false }
+            return canFlick(flick, seat: seat, in: state)
+        }
+    }
+
+    private static func canFlick(_ flick: Flick, seat: Int, in state: State) -> Bool {
+        guard (0..<stonesPerSeat).contains(flick.stone), state.stones[seat][flick.stone] != nil else { return false }
+        guard (-1000...1000).contains(flick.dx), (-1000...1000).contains(flick.dy), flick.dx != 0 || flick.dy != 0 else { return false }
+        return (1...1000).contains(flick.power)
+    }
+
+    public static func apply(_ move: Move, to state: State) -> State {
         guard canApply(move, to: state), let seat = state.nextSeat else { return state }
-        let sim = simulate(state, move)
-        var next = state
-        next.stones = sim.final
-        next.lastSimulation = sim
-        let verdict = resolve(stones: sim.final, seat: seat)
-        next.outcome = verdict.outcome
-        next.nextSeat = verdict.nextSeat
-        return next
+        switch move {
+        case .setup(let points):
+            var next = state
+            next.stones[seat] = points
+            next.placed[seat] = true
+            next.lastSimulation = nil
+            // 남은 좌석이 놓고, 둘 다 놓았으면 좌석 0부터 튕긴다.
+            next.nextSeat = next.placed.allSatisfy { $0 } ? 0 : 1 - seat
+            return next
+        case .flick(let flick):
+            let sim = simulate(state, flick)
+            var next = state
+            next.stones = sim.final
+            next.lastSimulation = sim
+            let verdict = resolve(stones: sim.final, seat: seat)
+            next.outcome = verdict.outcome
+            next.nextSeat = verdict.nextSeat
+            return next
+        }
     }
 
     /// 승패만 본다. 상대 돌이 0이면 내 승리, 둘 다 0이면 무승부, 내 돌만 0이면 상대 승리.
@@ -153,7 +227,7 @@ public enum Alkkagi: Game {
 
     /// 규칙에 맞지 않는 수는 아무것도 움직이지 않은 시뮬레이션으로 돌려보내, 방향이 0인 수나 없는 돌에도 멎지 않는다.
     public static func simulate(_ state: State, _ flick: Flick) -> Simulation {
-        guard canApply(flick, to: state), let seat = state.nextSeat else {
+        guard canApply(.flick(flick), to: state), let seat = state.nextSeat else {
             return Simulation(frames: [Frame(stones: state.stones)], events: [], final: state.stones, steps: 0)
         }
         var bodies: [[Body?]] = state.stones.map { row in row.map { $0.map { Body(pos: $0, vx: 0, vy: 0, alive: true) } } }

@@ -168,11 +168,12 @@ struct CupPongMatchTests {
 @Suite("OnlineMatch - 알까기")
 @MainActor
 struct AlkkagiMatchTests {
-    static func winningMoves() -> [Alkkagi.Flick] {
-        var moves: [Alkkagi.Flick] = []
+    /// 좌석 0·1이 기본 배치를 놓은 뒤 아홉 수로 백 돌을 다 떨어뜨리는, 좌석이 번갈아 두는 열한 수다.
+    static func winningMoves() -> [Alkkagi.Move] {
+        var moves: [Alkkagi.Move] = [.setup(Alkkagi.defaultPlacement(seat: 0)), .setup(Alkkagi.defaultPlacement(seat: 1))]
         for i in 0..<5 {
-            moves.append(.init(stone: i, dx: 0, dy: 1000, power: 1000))
-            if i < 4 { moves.append(.init(stone: i + 1, dx: 1000, dy: 0, power: 1)) }
+            moves.append(.flick(.init(stone: i, dx: 0, dy: 1000, power: 1000)))
+            if i < 4 { moves.append(.flick(.init(stone: i + 1, dx: 1000, dy: 0, power: 1))) }
         }
         return moves
     }
@@ -190,21 +191,26 @@ struct AlkkagiMatchTests {
     @Test("튕김이 상대에게 재생되고 차례가 넘어간다")
     func 한_수_전파() async throws {
         let (a, b, ta) = makePair()
-        var replayed: [Alkkagi.Flick] = []
-        b.onRemoteMove = { flick, _ in replayed.append(flick) }
-        let ok = await a.play(.init(stone: 0, dx: 0, dy: 1000, power: 1000)); #expect(ok)
+        // 배치를 먼저 주고받아 튕길 수 있는 판으로 만든다.
+        let 흑배치 = await a.play(.setup(Alkkagi.defaultPlacement(seat: 0))); #expect(흑배치)
+        await b.waitForIncoming()
+        let 백배치 = await b.play(.setup(Alkkagi.defaultPlacement(seat: 1))); #expect(백배치)
+        await a.waitForIncoming()
+        var replayed: [Alkkagi.Move] = []
+        b.onRemoteMove = { move, _ in replayed.append(move) }
+        let ok = await a.play(.flick(.init(stone: 0, dx: 0, dy: 1000, power: 1000))); #expect(ok)
         await b.waitForIncoming()
         #expect(replayed.count == 1 && b.state.remaining(seat: 1) == 4 && b.isLocalTurn && !a.isLocalTurn)
         #expect(ta.lastPayload?.turnSeat == 1)
         #expect(b.state.lastSimulation != nil, "재생용 시뮬레이션이 상태에 남는다")
     }
 
-    @Test("아홉 수로 끝나고 승자가 실린다")
+    @Test("배치 두 수와 아홉 수로 끝나고 승자가 실린다")
     func 완주() async throws {
         let (a, b, ta) = makePair()
-        for (i, f) in Self.winningMoves().enumerated() {
+        for (i, m) in Self.winningMoves().enumerated() {
             let mover = i % 2 == 0 ? a : b, other = i % 2 == 0 ? b : a
-            let ok = await mover.play(f); #expect(ok, "\(i)")
+            let ok = await mover.play(m); #expect(ok, "\(i)")
             await other.waitForIncoming()
         }
         #expect(a.outcome == .win(seat: 0) && b.outcome == .win(seat: 0))
