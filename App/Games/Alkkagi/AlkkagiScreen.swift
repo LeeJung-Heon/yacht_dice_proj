@@ -12,8 +12,11 @@ struct AlkkagiScreen: View {
     /// 잡은 돌과 손가락의 격자 위치. 배치 중에는 초안의 돌을, 튕길 때는 판 위의 돌을 가리킨다.
     @State private var grabbed: Int?
     @State private var finger: Alkkagi.Point?
-    /// 확정하기 전의 내 배치. 내가 놓을 차례가 되면 기본 배치로 시작한다.
-    @State private var draft: [Alkkagi.Point] = []
+    /// 확정하기 전의 배치와 그 임자. 좌석을 함께 들어 앞 좌석의 초안이 다음 좌석의 돌로 보이지 않는다.
+    @State private var draft: (seat: Int, points: [Alkkagi.Point])?
+    /// 한 기기에서 좌석이 넘어간 직후에는 "배치 완료"를 잠근다. 두 번 두드린 손가락이 다음 사람 몫까지 놓아 버린다.
+    @State private var placeLocked = false
+    @State private var placeLockTask: Task<Void, Never>?
     /// 재생 중인 프레임의 배치. nil이면 상태의 배치를 그린다.
     @State private var playing: [[Alkkagi.Point?]]?
     /// 재생 중인 수를 둔 좌석. 수는 먼저 판에 들어가므로 머리글은 상태가 아니라 이 좌석을 따라간다.
@@ -31,17 +34,18 @@ struct AlkkagiScreen: View {
     private var displayedStones: [[Alkkagi.Point?]] {
         if let playing { return playing }
         var stones = match.state.stones
-        // 상대가 놓는 동안에도 내 초안은 보인다 — 상대 돌은 이미 판에 놓인 것만 그려진다.
-        if match.state.phase == .setup, !match.state.placed[mySeat] { stones[mySeat] = myDraft.map { Optional($0) } }
+        // 초안은 내가 놓을 차례에만 얹는다 — 상대가 놓는 동안 내 자리는 비어 있고 명패도 0을 든다.
+        if placingSeat == mySeat { stones[mySeat] = myDraft.map { Optional($0) } }
         return stones
     }
     /// 지금 놓아야 하는 좌석. 배치가 끝났으면 nil이다.
     private var placingSeat: Int? { match.state.phase == .setup ? Alkkagi.currentSeat(match.state) : nil }
     /// 내가 놓을 차례인가.
     private var isMyPlacement: Bool { placingSeat == mySeat && match.isLocalTurn }
-    /// 그릴 내 배치. `draft`가 아직 채워지기 전 한 프레임에도 기본 배치가 보인다.
+    /// 그릴 내 배치. 초안이 내 것이 아니면(아직 없거나 앞 좌석의 것이면) 기본 배치가 보인다.
     private var myDraft: [Alkkagi.Point] {
-        draft.count == Alkkagi.stonesPerSeat ? draft : Alkkagi.defaultPlacement(seat: mySeat)
+        guard let draft, draft.seat == mySeat else { return Alkkagi.defaultPlacement(seat: mySeat) }
+        return draft.points
     }
     /// 배치 중에 끌고 있는 내 돌. 놓기 전까지는 초안이 아니라 손끝에 그린다.
     private var draggingDraft: (seat: Int, stone: Int, at: Alkkagi.Point)? {
@@ -60,6 +64,8 @@ struct AlkkagiScreen: View {
     }
     /// 온라인의 좌석 1은 내 돌이 아래에 오게 판을 돌린다.
     private var flipped: Bool { match.mode.isOnline && match.localSeat == 1 }
+    /// 띠와 토스트가 뜨는 높이. 머리글 한 줄(8 + 22)과 명패(28), 그 사이 간격 둘(10)을 더한 값이라 명패 바로 아래다.
+    private let topStripInset: CGFloat = 78
 
     /// 잡은 돌에서 손가락까지가 당김이다. 놓으면 반대 방향으로 날아간다.
     private var pull: (from: Alkkagi.Point, to: Alkkagi.Point)? {
@@ -102,7 +108,7 @@ struct AlkkagiScreen: View {
                 if showDisconnected {
                     Label("연결 끊김 — 재연결 중", systemImage: "wifi.slash").font(.caption.weight(.semibold))
                         .padding(.horizontal, 12).padding(.vertical, 6).background(theme.ink.opacity(0.85), in: Capsule())
-                        .foregroundStyle(theme.paper).padding(.top, 118).accessibilityIdentifier("online.connection")
+                        .foregroundStyle(theme.paper).padding(.top, topStripInset).accessibilityIdentifier("online.connection")
                 }
             }
             .overlay(alignment: .top) {
@@ -113,7 +119,7 @@ struct AlkkagiScreen: View {
             }
             .overlay { if let turnBanner { TurnBanner(text: turnBanner).transition(.scale(scale: 0.9).combined(with: .opacity)) } }
             .overlay(alignment: .top) {
-                if let toast { ScoreToast(text: toast).padding(.top, 118).transition(.move(edge: .top).combined(with: .opacity)) }
+                if let toast { ScoreToast(text: toast).padding(.top, topStripInset).transition(.move(edge: .top).combined(with: .opacity)) }
             }
         }
         // 훅이 match를 강하게 담으면 match → onRemoteMove → match 고리가 되어, 판을 떠나도 세션이 살아남는다.
@@ -135,10 +141,18 @@ struct AlkkagiScreen: View {
             guard !isPlaying else { return }
             announceTurn()
         }
-        .onChange(of: placingSeat, initial: true) { _, seat in
+        .onChange(of: placingSeat, initial: true) { old, seat in
             // 내가 놓을 차례가 되면 기본 배치에서 시작한다 — 로컬 2인은 좌석이 넘어갈 때마다 다시 채운다.
-            guard let seat, seat == mySeat else { return }
-            draft = Alkkagi.defaultPlacement(seat: seat)
+            if let seat, seat == mySeat { draft = (seat, Alkkagi.defaultPlacement(seat: seat)) }
+            // 한 기기에서 좌석이 바뀐 순간에는 배너가 뜨는 동안 단추를 잠근다. 온라인은 손이 하나라 잠글 것이 없다.
+            guard old != seat, seat != nil, !match.mode.isOnline else { return }
+            placeLockTask?.cancel()
+            placeLocked = true
+            placeLockTask = Task {
+                try? await Task.sleep(for: .seconds(1.2))
+                guard !Task.isCancelled else { return }
+                placeLocked = false
+            }
         }
         .onChange(of: match.lastRemoteMove?.id) { _, _ in
             guard let remote = match.lastRemoteMove, let sim = match.state.lastSimulation else { return }
@@ -228,8 +242,8 @@ struct AlkkagiScreen: View {
         }
     }
 
-    /// 내 차례이고 초안이 규칙에 맞을 때만 확정할 수 있다.
-    private var canPlace: Bool { isMyPlacement && Alkkagi.placementIsValid(myDraft, seat: mySeat) }
+    /// 내 차례이고 잠기지 않았고 초안이 규칙에 맞을 때만 확정할 수 있다.
+    private var canPlace: Bool { isMyPlacement && !placeLocked && Alkkagi.placementIsValid(myDraft, seat: mySeat) }
 
     private func placeDraft() {
         let points = myDraft
@@ -295,7 +309,7 @@ struct AlkkagiScreen: View {
         var next = myDraft
         next[grabbed] = to
         guard Alkkagi.placementIsValid(next, seat: mySeat) else { return }
-        draft = next
+        draft = (mySeat, next)
     }
 
     private func resultText(_ outcome: Outcome) -> String {

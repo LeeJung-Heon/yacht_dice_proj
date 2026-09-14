@@ -20,6 +20,8 @@ final class AlkkagiUITests: XCTestCase {
         XCTAssertTrue(done.waitForExistence(timeout: 5))
         done.tap()
         XCTAssertEqual(wait(until: { turn.label == "백 배치" }), .completed, "흑이 놓은 뒤 백 배치가 오지 않았다: \(turn.label)")
+        // 좌석이 넘어간 직후에는 단추가 잠겨 있다 — 풀린 다음에 백이 누른다
+        XCTAssertEqual(wait(until: { done.isEnabled }), .completed, "배치 완료가 다시 열리지 않았다")
         done.tap()
         XCTAssertEqual(wait(until: { turn.label == "흑 차례" }), .completed, "둘 다 놓았는데 흑 차례가 오지 않았다: \(turn.label)")
         // 흑 돌 2(6000, 2000)는 판의 x 중앙, 아래에서 2.5/13 지점(여백 반 칸 + 2칸)/13칸 → 정규화 y = 1 - 2.5/13
