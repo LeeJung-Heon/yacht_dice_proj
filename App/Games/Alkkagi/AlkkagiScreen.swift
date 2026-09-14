@@ -364,6 +364,8 @@ struct AlkkagiScreen: View {
             do {
                 if due > 0 { try await Task.sleep(for: .seconds(due)) } else { try Task.checkCancellation() }
             } catch { break }
+            // 머리글과 명패의 돌 수는 프레임마다 갱신해 떨어지는 순간에 줄어든다. 판은 시계가 그리므로 영향이 없다.
+            playing.wrappedValue = sim.frames[i].stones
             for event in eventsToPlay(in: sim, frame: i, from: &eventIndex) {
                 switch event.kind {
                 case .collision: SoundPlayer.shared.play(SoundSynth.clack(), key: "clack"); Haptics.shared.play(.impactMedium)
@@ -371,6 +373,8 @@ struct AlkkagiScreen: View {
                 }
             }
         }
+        // 다른 재생이 그 사이 시작됐으면 그쪽 상태를 지우지 않는다.
+        guard replay.wrappedValue?.start == start else { return }
         replay.wrappedValue = nil
         playing.wrappedValue = nil
         isPlaying.wrappedValue = false
