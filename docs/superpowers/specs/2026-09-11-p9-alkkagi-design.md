@@ -31,8 +31,13 @@ public enum Alkkagi: Game {
     public struct Point: Codable, Equatable, Sendable { public var x: Int; public var y: Int }
     public struct Flick: Codable, Equatable, Sendable { public let stone: Int; public let dx: Int; public let dy: Int; public let power: Int }   // Move
     public struct Frame: Equatable, Sendable { public let stones: [[Point?]] }        // [좌석][돌]
-    public enum Event: Equatable, Sendable { case collision(step: Int, a: (seat: Int, stone: Int), b: (seat: Int, stone: Int)); case dropped(step: Int, seat: Int, stone: Int) }
-    public struct Simulation: Equatable, Sendable { public let frames: [Frame]; public let events: [Event]; public let final: [[Point?]] }
+    public struct StoneRef: Equatable, Sendable { public let seat: Int; public let stone: Int }
+    public struct Event: Equatable, Sendable {
+        public enum Kind: Equatable, Sendable { case collision(a: StoneRef, b: StoneRef); case dropped(StoneRef) }
+        public let step: Int
+        public let kind: Kind
+    }
+    public struct Simulation: Equatable, Sendable { public let frames: [Frame]; public let events: [Event]; public let final: [[Point?]]; public let steps: Int }
     public struct State: Codable, Equatable, Sendable {
         public var stones: [[Point?]]          // 떨어진 돌은 nil
         public var nextSeat: Int?
@@ -57,7 +62,7 @@ public enum Alkkagi: Game {
 
 | 파일 | 책임 |
 |---|---|
-| `App/Games/Alkkagi/AlkkagiGeometry.swift` | `project(_ p: Point, in size: CGSize, flipped: Bool) -> CGPoint`(판을 정사각형에 맞추고 `flipped`면 180°), `point(at: CGPoint, in:flipped:) -> Point`, `flick(stone:from drag: CGVector, in size: CGSize) -> Flick?`(끈 길이 → 3200 격자 단위 = power 1000, 방향은 끈 반대) |
+| `App/Games/Alkkagi/AlkkagiGeometry.swift` | `project(_ p: Point, in size: CGSize, flipped: Bool) -> CGPoint`(판을 정사각형에 맞추고 `flipped`면 180°), `point(at: CGPoint, in:flipped:) -> Point`, `stone(at:stones:in:flipped:) -> Int?`(여유 안에서 가장 가까운 돌), `clampPull(from:to:) -> Point`(최대 당김에서 끊는다), `flick(stone: Int, from origin: Point, to finger: Point) -> Flick?`(격자 점 둘을 받아 끈 길이 3200 = power 1000, 방향은 끈 반대) |
 | `App/Games/Alkkagi/AlkkagiBoardView.swift` | `Canvas`: 나무 판·13×13 격자·화점 5개·돌(흑백, 그림자·하이라이트)·당김 선과 화살표·예상 궤적 점선(시뮬레이션 앞 40프레임의 그 돌 위치)·재생 중 프레임의 돌 위치. 식별자 `alkkagi.board`, 라벨 "흑 n · 백 m" |
 | `App/Games/Alkkagi/AlkkagiScreen.swift` | 헤더(`header.menu`, `header.status` = "내 돌 N · 상대 돌 M", `header.turn`), 명패 둘(`players.seat.<i>`, `players.presence.<i>`), 드래그(내 돌 위에서 시작한 것만) → 놓으면 `match.play(Flick)`, 프레임 재생(30fps, 충돌 프레임에 `SoundSynth.clack`·햅틱, 낙하에 `drop`), 상대 수 재생(`onRemoteMove`가 `simulate`로 프레임을 만들어 같은 재생), 차례 배너·토스트·연결 띠·결과 카드(`alkkagi.result`, `alkkagi.back`), `scenePhase` resync |
 | `App/Games/Alkkagi/AlkkagiMenu.swift` | 로컬 2인(이름 기본값 흑·백)·온라인·이어하기, `menu.alkkagi.local`, `menu.alkkagi.online`, `menu.alkkagi.local.start`, `menu.alkkagi.name.0/1`, `menu.back` |
@@ -91,4 +96,4 @@ public enum Alkkagi: Game {
 
 - 물리는 회전·미끄러짐 없는 단순 모델이고 정수 시뮬레이션이라 미세한 떨림이 보일 수 있다.
 - 완벽한 힘을 계산해 보내는 클라이언트는 막지 못한다.
-- 시뮬레이션이 최대 5초라 아주 긴 굴림은 그 자리에서 멈춘 것으로 친다.
+- 600스텝 상한은 실제로는 닿지 않는 여유다 — 가장 센 튕김의 속력 30000도 스텝마다 100씩 깎는 마찰에 300스텝 안에 멎고 반발 9/10은 속력을 키우지 못하니, 시작 배치에서 잰 최악이 163스텝이라 재생은 길어야 1.5초쯤에 끝난다.

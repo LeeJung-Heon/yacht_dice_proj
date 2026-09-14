@@ -12,6 +12,7 @@ public enum Alkkagi: Game {
     public static let stoneRadius = 400
     public static let stonesPerSeat = 5
     public static let stepsPerSecond = 120
+    /// 스텝 상한. 최대 속력 30000이 마찰 100/스텝에 300스텝 안에 멎고 반발 9/10은 속력을 키우지 못해, 실제로는 닿지 않는 여유다.
     public static let maxSteps = 600
     public static let frameEvery = 4
     /// 낙하 경계. 중심이 이 밖이면 떨어진 것이다.
