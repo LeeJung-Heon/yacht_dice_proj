@@ -1,6 +1,6 @@
 import Foundation
 
-/// 컵퐁. 상대 진영의 컵 열 개를 번갈아 던져 먼저 비운다. 수는 던진 힘뿐이고 착지는 정수 수식이라 어디서나 같다.
+/// 컵퐁. 상대 진영의 컵 열 개를 번갈아 던져 먼저 비운다. 비행과 충돌은 고정 간격 정수 물리로 재현한다.
 public enum CupPong: Game {
     public static let id = "cuppong"
     public static let displayName = "컵퐁"
@@ -39,6 +39,14 @@ public enum CupPong: Game {
         public var nextSeat: Int?
         public var lastShot: Landing?
         public var outcome: Outcome?
+        /// 저장하지 않는 재생 정보. 던진 수에서 다시 계산한다.
+        public var lastSimulation: Simulation? = nil
+
+        enum CodingKeys: String, CodingKey { case cups, nextSeat, lastShot, outcome }
+
+        public static func == (lhs: State, rhs: State) -> Bool {
+            lhs.cups == rhs.cups && lhs.nextSeat == rhs.nextSeat && lhs.lastShot == rhs.lastShot && lhs.outcome == rhs.outcome
+        }
         public func remaining(seat: Int) -> Int { cups[seat].filter { $0 }.count }
     }
 
@@ -51,23 +59,18 @@ public enum CupPong: Game {
         state.nextSeat != nil && (-1000...1000).contains(move.dx) && (0...1000).contains(move.power)
     }
 
-    /// 착지: 세기가 클수록 멀리, 좌우는 거리에 비례해 벌어진다. 정수 나눗셈만 쓴다.
+    /// 실제 비행과 충돌을 끝까지 계산한 결과. 화면 재생도 같은 시뮬레이션을 사용한다.
     public static func landing(of shot: Shot, against cups: [Bool]) -> Landing {
-        let l = 1200 + shot.power * 2 + shot.power * shot.power / 400
-        let x = shot.dx * l / 1500
-        guard l <= tableLength, abs(x) <= tableHalfWidth else { return Landing(x: x, y: l, cup: nil) }
-        let r2 = cupRadius * cupRadius
-        let hit = cupCenters.indices.first { i in
-            cups[i] && (x - cupCenters[i].x) * (x - cupCenters[i].x) + (l - cupCenters[i].y) * (l - cupCenters[i].y) < r2
-        }
-        return Landing(x: x, y: l, cup: hit)
+        simulate(shot, against: cups).landing
     }
 
     public static func apply(_ move: Shot, to state: State) -> State {
         guard canApply(move, to: state), let seat = state.nextSeat else { return state }
         var next = state
         let target = 1 - seat
-        let result = landing(of: move, against: state.cups[target])
+        let simulation = simulate(move, against: state.cups[target])
+        let result = simulation.landing
+        next.lastSimulation = simulation
         next.lastShot = result
         if let cup = result.cup {
             next.cups[target][cup] = false

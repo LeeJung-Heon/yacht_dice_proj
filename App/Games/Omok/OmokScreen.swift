@@ -20,7 +20,7 @@ struct OmokScreen: View {
     var body: some View {
         ZStack {
             WoodBackground()
-            VStack(spacing: 12) {
+            VStack(spacing: 8) {
                 header
                 seats
                 OmokBoardView(state: match.state, preview: preview, previewSeat: match.localSeat ?? 0, animating: animating) { move in
@@ -28,6 +28,16 @@ struct OmokScreen: View {
                     preview = move
                     Haptics.shared.play(.selection)
                 }
+                .padding(.horizontal, 4)
+                HStack {
+                    Text("19 × 19 · 다섯을 먼저 이으면 승리")
+                    Spacer()
+                    if let preview {
+                        Text("\(preview.x + 1)열 · \(preview.y + 1)행").monospacedDigit()
+                    }
+                }
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(theme.ivory.opacity(0.85))
                 .padding(.horizontal, 12)
                 actionBar
                 Spacer(minLength: 0)
@@ -76,14 +86,16 @@ struct OmokScreen: View {
 
     private var header: some View {
         HStack {
-            Button(action: onReturn) { Image(systemName: "chevron.left").foregroundStyle(theme.ivory) }
+            Button(action: onReturn) {
+                Image(systemName: "chevron.left").foregroundStyle(theme.ivory).frame(width: 44, height: 44)
+            }
                 .accessibilityIdentifier("header.menu").accessibilityLabel("메뉴로")
             Spacer()
             Text("오목").font(.system(.title3, design: .serif, weight: .semibold)).foregroundStyle(theme.ivory)
             Spacer()
             Text("\(match.log.moves.count)수").font(.caption).monospacedDigit().foregroundStyle(theme.brass).accessibilityIdentifier("header.status")
         }
-        .padding(.horizontal, 16).padding(.top, 8)
+        .padding(.leading, 4).padding(.trailing, 16)
     }
 
     /// 명패 둘. 현재 차례는 황동, 원격 상대는 접속 점.

@@ -12,7 +12,7 @@ struct MoveLogTests {
         let second = log.append(Omok.Move(x: 7, y: 7))
         #expect(first)
         #expect(!second)
-        #expect(log.moves.count == 1 && log.state.cells[7 * 15 + 7] == 1)
+        #expect(log.moves.count == 1 && log.state.stone(x: 7, y: 7) == 1)
     }
 
     @Test("JSON 왕복이 같고, 적용 불가한 로그는 디코드에서 던진다")
@@ -21,7 +21,7 @@ struct MoveLogTests {
         _ = log.append(Omok.Move(x: 0, y: 0)); _ = log.append(Omok.Move(x: 1, y: 1))
         let data = try log.encoded()
         #expect(try MoveLog<Omok>.decoded(from: data) == log)
-        let bad = Data("{\"moves\":[{\"x\":0,\"y\":0},{\"x\":0,\"y\":0}]}".utf8)
+        let bad = Data("{\"rulesVersion\":2,\"moves\":[{\"x\":0,\"y\":0},{\"x\":0,\"y\":0}]}".utf8)
         #expect(throws: (any Error).self) { try MoveLog<Omok>.decoded(from: bad) }
     }
 }

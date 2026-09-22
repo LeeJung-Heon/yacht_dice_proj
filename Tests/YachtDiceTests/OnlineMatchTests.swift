@@ -168,12 +168,18 @@ struct CupPongMatchTests {
 @Suite("OnlineMatch - 알까기")
 @MainActor
 struct AlkkagiMatchTests {
-    /// 좌석 0·1이 기본 배치를 놓은 뒤 아홉 수로 백 돌을 다 떨어뜨리는, 좌석이 번갈아 두는 열한 수다.
+    /// 두 라운드 모두 흑이 이긴다. 두 번째 라운드는 백이 먼저 배치하고 튕긴다.
     static func winningMoves() -> [Alkkagi.Move] {
-        var moves: [Alkkagi.Move] = [.setup(Alkkagi.defaultPlacement(seat: 0)), .setup(Alkkagi.defaultPlacement(seat: 1))]
-        for i in 0..<5 {
-            moves.append(.flick(.init(stone: i, dx: 0, dy: 1000, power: 1000)))
-            if i < 4 { moves.append(.flick(.init(stone: i + 1, dx: 1000, dy: 0, power: 1))) }
+        var moves: [Alkkagi.Move] = []
+        for round in 1...2 {
+            if round == 2 { moves.append(.nextRound) }
+            let first = round == 1 ? 0 : 1
+            moves += [.setup(Alkkagi.defaultPlacement(seat: first)), .setup(Alkkagi.defaultPlacement(seat: 1 - first))]
+            if round == 2 { moves.append(.flick(.init(stone: 0, dx: 1000, dy: 0, power: 1))) }
+            for i in 0..<5 {
+                moves.append(.flick(.init(stone: i, dx: 0, dy: 1000, power: 1000)))
+                if i < 4 { moves.append(.flick(.init(stone: i + 1, dx: 1000, dy: 0, power: 1))) }
+            }
         }
         return moves
     }
@@ -205,13 +211,20 @@ struct AlkkagiMatchTests {
         #expect(b.state.lastSimulation != nil, "재생용 시뮬레이션이 상태에 남는다")
     }
 
-    @Test("배치 두 수와 아홉 수로 끝나고 승자가 실린다")
+    @Test("라운드 전환도 전파하고 두 번 이겨야 최종 승자가 실린다")
     func 완주() async throws {
         let (a, b, ta) = makePair()
         for (i, m) in Self.winningMoves().enumerated() {
-            let mover = i % 2 == 0 ? a : b, other = i % 2 == 0 ? b : a
+            let mover = a.isLocalTurn ? a : b, other = a.isLocalTurn ? b : a
             let ok = await mover.play(m); #expect(ok, "\(i)")
             await other.waitForIncoming()
+            #expect(a.state.roundNumber == b.state.roundNumber && a.state.roundWins == b.state.roundWins)
+            if i == 10 {
+                #expect(a.outcome == nil && b.outcome == nil && a.state.roundWins == [1, 0])
+                #expect(ta.lastPayload?.finished == false && ta.lastPayload?.winnerSeat == nil)
+                let early = await a.play(.nextRound)
+                #expect(!early, "다음 라운드 선공인 백만 준비를 진행한다")
+            }
         }
         #expect(a.outcome == .win(seat: 0) && b.outcome == .win(seat: 0))
         #expect(ta.lastPayload?.finished == true && ta.lastPayload?.winnerSeat == 0)

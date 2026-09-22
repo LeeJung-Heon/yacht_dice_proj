@@ -15,11 +15,18 @@ enum CupPongGeometry {
                             power: Int(max(0, min(1000, power.rounded()))))
     }
 
-    /// 착지까지 직선으로 가며 높이는 `4p(1-p)` 포물선의 산이다(연출).
-    static func ballPath(to landing: CupPong.Landing, progress: CGFloat) -> (x: Int, y: Int, height: CGFloat) {
-        let p = max(0, min(1, progress))
-        let x = Int((CGFloat(landing.x) * p).rounded())
-        let y = Int((CGFloat(landing.y) * p).rounded())
-        return (x, y, 4 * p * (1 - p))
+    /// 실제 충돌 경로를 화면의 경과 시간에 맞춰 보간한다. 마지막 표본은 4스텝 간격이 아닐 수 있다.
+    static func ballFrame(in frames: [CupPong.Frame], at seconds: TimeInterval) -> (x: Int, y: Int, height: CGFloat)? {
+        guard let first = frames.first, let last = frames.last else { return nil }
+        let step = max(0, seconds) * Double(CupPong.stepsPerSecond)
+        guard step > Double(first.step) else { return (first.x, first.y, CGFloat(first.height)) }
+        guard step < Double(last.step), let index = frames.firstIndex(where: { Double($0.step) >= step }) else {
+            return (last.x, last.y, CGFloat(last.height))
+        }
+        let a = frames[index - 1], b = frames[index]
+        let t = (step - Double(a.step)) / Double(max(1, b.step - a.step))
+        return (Int((Double(a.x) + Double(b.x - a.x) * t).rounded()),
+                Int((Double(a.y) + Double(b.y - a.y) * t).rounded()),
+                CGFloat(Double(a.height) + Double(b.height - a.height) * t))
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import GameCore
 import Observation
 import Supabase
 import YachtCore
@@ -57,11 +58,9 @@ final class SupabaseService {
     /// `log`는 게임별 빈 로그다 — 요트는 `MatchLog`, 그 외는 게임이 정하는 모양의 JSON.
     func createRoom(name: String, game: String = "yacht", player: String? = nil) async throws -> MatchRow {
         guard let uid else { throw ServiceError.notSignedIn }
+        let log = try Self.initialLog(for: game)
         try await client.from("matches").delete()
             .eq("host_uid", value: uid.uuidString).eq("status", value: "waiting").execute()
-        let log: JSONValue = game == "yacht"
-            ? try JSONDecoder().decode(JSONValue.self, from: MatchLog(playerCount: 2).encoded())
-            : .object(["moves": .array([])])
         var generator = SystemRandomNumberGenerator()
         var lastError: Error = ServiceError.codeCollision
         for _ in 0..<5 {
@@ -77,15 +76,52 @@ final class SupabaseService {
         throw lastError
     }
 
-    func joinRoom(code: String, name: String, player: String? = nil) async throws -> MatchRow {
+    func joinRoom(code: String, name: String, game: String = "yacht", player: String? = nil) async throws -> MatchRow {
         guard uid != nil else { throw ServiceError.notSignedIn }
-        var params: [String: String] = ["p_code": code, "p_name": name]
-        if let player { params["p_player"] = player }
-        let row: MatchRow = try await client
-            .rpc("join_match", params: params)
-            .single()
-            .execute().value
-        return row
+        let params = try JoinRoomParameters(code: code, name: name, game: game, player: player)
+        do {
+            return try await client.rpc("join_match", params: params).single().execute().value
+        } catch let error as PostgrestError {
+            if error.message == "rules version mismatch" { throw ServiceError.rulesVersionMismatch }
+            if error.message == "game mismatch" { throw ServiceError.gameMismatch }
+            throw error
+        }
+    }
+
+    static func initialLog(for game: String) throws -> JSONValue {
+        let data: Data
+        switch game {
+        case "yacht": data = try MatchLog(playerCount: 2).encoded()
+        case Omok.id: data = try MoveLog<Omok>().encoded()
+        case CupPong.id: data = try MoveLog<CupPong>().encoded()
+        case Alkkagi.id: data = try MoveLog<Alkkagi>().encoded()
+        default: throw ServiceError.unsupportedGame
+        }
+        return try JSONDecoder().decode(JSONValue.self, from: data)
+    }
+
+    struct JoinRoomParameters: Encodable {
+        let code: String
+        let name: String
+        let game: String
+        let player: String?
+        let rulesVersion: Int
+
+        init(code: String, name: String, game: String, player: String?) throws {
+            self.code = code; self.name = name; self.game = game; self.player = player
+            switch game {
+            case "yacht": rulesVersion = 1
+            case Omok.id: rulesVersion = Omok.rulesVersion
+            case CupPong.id: rulesVersion = CupPong.rulesVersion
+            case Alkkagi.id: rulesVersion = Alkkagi.rulesVersion
+            default: throw ServiceError.unsupportedGame
+            }
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case code = "p_code", name = "p_name", game = "p_game", player = "p_player"
+            case rulesVersion = "p_rules_version"
+        }
     }
 
     /// Game Center 로그인 뒤 gamePlayerID ↔ 내 uid를 잇는다.
@@ -137,11 +173,14 @@ final class SupabaseService {
     }
 
     enum ServiceError: LocalizedError {
-        case notSignedIn, codeCollision
+        case notSignedIn, codeCollision, unsupportedGame, rulesVersionMismatch, gameMismatch
         var errorDescription: String? {
             switch self {
             case .notSignedIn: "로그인되지 않았다"
             case .codeCollision: "방 코드를 만들지 못했다"
+            case .unsupportedGame: "아직 지원하지 않는 게임입니다."
+            case .rulesVersionMismatch: "상대와 게임 규칙 버전이 다릅니다. 두 기기 모두 최신 버전으로 업데이트한 뒤 새 방을 만들어 주세요."
+            case .gameMismatch: "다른 게임의 방 코드입니다. 같은 게임을 선택한 뒤 다시 들어가 주세요."
             }
         }
     }

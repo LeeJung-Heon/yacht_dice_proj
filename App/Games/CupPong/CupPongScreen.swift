@@ -18,6 +18,7 @@ struct CupPongScreen: View {
     @State private var ball: (x: Int, y: Int, height: CGFloat)?
     @State private var vanishing: Int?
     @State private var isThrowing = false
+    @State private var throwTask: Task<Void, Never>?
     @State private var turnBanner: String?
     @State private var toast: String?
     /// 채널이 3초 넘게 끊겨 있을 때만 띠를 보인다. 짧은 재접속은 조용히 지나간다.
@@ -38,7 +39,7 @@ struct CupPongScreen: View {
     private var targetOwner: String { 1 - shooter == mySeat ? "내 컵" : "상대 컵" }
     /// 날아가는 공이 없고 내 차례면 던지는 자리에 공을 얹어 둔다 — 끌라고 한 그 공이 보여야 한다.
     private var displayedBall: (x: Int, y: Int, height: CGFloat)? {
-        ball ?? (match.isLocalTurn && !isThrowing ? (x: 0, y: 0, height: 0) : nil)
+        ball ?? (match.isLocalTurn && !isThrowing ? (x: 0, y: 0, height: 400) : nil)
     }
 
     var body: some View {
@@ -95,7 +96,7 @@ struct CupPongScreen: View {
                 }
             }
             .task { await syncPhotos() }
-            .onDisappear { match.onRemoteMove = nil; disconnectTask?.cancel() }
+            .onDisappear { match.onRemoteMove = nil; disconnectTask?.cancel(); throwTask?.cancel(); throwTask = nil; ball = nil; vanishing = nil; isThrowing = false }
             .onChange(of: match.log.moves.count, initial: true) { _, _ in
                 guard match.outcome == nil, let seat = CupPong.currentSeat(match.state) else { return }
                 if let last = match.state.lastShot, last.cup != nil {
@@ -228,11 +229,10 @@ struct CupPongScreen: View {
                 guard let shot = CupPongGeometry.shot(dx: dx, dy: dy, speed: speed, screenHeight: height) else { return }
                 // 잠금은 Task를 만들기 전에 건다. 그 사이에 두 번째 끌기가 들어오면 공이 둘이 된다.
                 isThrowing = true
-                Task {
+                throwTask = Task {
+                    defer { isThrowing = false; throwTask = nil }
                     let landing = await Self.animate(shot: shot, against: targetCups, ball: $ball, vanishing: $vanishing)
-                    // 공이 멎으면 곧바로 잠금을 푼다. 서버를 다녀오는 동안 손이 묶이지 않아야 하고,
-                    // 이른 두 번째 끌기는 isLocalTurn·canApply가 막아 "지금은 던질 수 없다"로 돌아온다.
-                    isThrowing = false
+                    guard !Task.isCancelled else { return }
                     let played = await match.play(shot)
                     // 컵은 play가 판에 수를 넣은 뒤에 거둔다. 먼저 지우면 한 프레임 동안 컵이 되살아난다.
                     if landing.cup != nil { vanishing = nil }
@@ -247,31 +247,48 @@ struct CupPongScreen: View {
         return "\(seatNames[seat]) 승리"
     }
 
-    /// 공을 0.9초 날리고, 맞혔으면 컵이 옅어진다. 내 던지기와 상대 재생이 같은 길을 쓴다.
-    /// 옅어진 컵은 부르는 쪽이 판에 수를 넣은 뒤에 거두므로 여기서는 착지만 돌려준다.
-    ///
-    /// 화면 상태 바인딩만 받는 정적 함수다. 훅이 뷰 값을 담으면 그 안의 `match`까지 함께 잡힌다.
+    /// 판정과 같은 경로를 실제 시간으로 재생한다. 기기 프레임률이 달라도 충돌 순간과 종료 시각이 같다.
     @MainActor
     private static func animate(shot: CupPong.Shot, against cups: [Bool],
                                 ball: Binding<(x: Int, y: Int, height: CGFloat)?>, vanishing: Binding<Int?>) async -> CupPong.Landing {
-        let landing = CupPong.landing(of: shot, against: cups)
-        // 테이블을 넘긴 힘은 가장자리까지만 보이고 접는다. 끝까지 날리면 보이지 않는 곳에서 시간만 흐른다.
-        let reach = landing.y > CupPong.tableLength ? CGFloat(CupPong.tableLength) / CGFloat(landing.y) : 1
-        let frames = max(1, Int((27 * reach).rounded()))
-        for f in 0...frames {
-            ball.wrappedValue = CupPongGeometry.ballPath(to: landing, progress: CGFloat(f) / CGFloat(frames) * reach)
-            try? await Task.sleep(for: .milliseconds(33))
+        let simulation = CupPong.simulate(shot, against: cups)
+        let duration = Double(simulation.steps) / Double(CupPong.stepsPerSecond)
+        let clock = ContinuousClock()
+        let start = clock.now
+        var eventIndex = 0
+        var lastContactStep = -100
+        defer { ball.wrappedValue = nil }
+        while !Task.isCancelled {
+            let elapsed = start.duration(to: clock.now).components
+            let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+            ball.wrappedValue = CupPongGeometry.ballFrame(in: simulation.frames, at: seconds)
+            let step = Int(seconds * Double(CupPong.stepsPerSecond))
+            while eventIndex < simulation.events.count && simulation.events[eventIndex].step <= step {
+                let event = simulation.events[eventIndex]
+                switch event.kind {
+                case .sunk:
+                    SoundPlayer.shared.play(SoundSynth.pong(), key: "pong")
+                    Haptics.shared.play(.success)
+                case .tableBounce, .rim, .cupWall:
+                    // 밀집 접촉에서도 한 번의 충돌이 소리 여러 개로 겹치지 않게 한다.
+                    if event.step - lastContactStep >= 14 {
+                        SoundPlayer.shared.play(event.kind == .tableBounce ? SoundSynth.tick() : SoundSynth.clack(), key: "cupContact")
+                        Haptics.shared.play(.impactLight)
+                        lastContactStep = event.step
+                    }
+                case .leftTable: break
+                }
+                eventIndex += 1
+            }
+            if seconds >= duration { break }
+            do { try await Task.sleep(for: .milliseconds(8)) } catch { return simulation.landing }
         }
-        ball.wrappedValue = nil
-        if let cup = landing.cup {
-            SoundPlayer.shared.play(SoundSynth.pong(), key: "pong")
-            Haptics.shared.play(.success)
+        guard !Task.isCancelled else { return simulation.landing }
+        if let cup = simulation.landing.cup {
             vanishing.wrappedValue = cup
-            try? await Task.sleep(for: .milliseconds(350))
-        } else {
-            Haptics.shared.play(.impactLight)
+            try? await Task.sleep(for: .milliseconds(180))
         }
-        return landing
+        return simulation.landing
     }
 
     private func showBanner(_ text: String) {

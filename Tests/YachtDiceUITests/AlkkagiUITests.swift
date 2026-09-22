@@ -14,6 +14,9 @@ final class AlkkagiUITests: XCTestCase {
         app.buttons["menu.alkkagi.local.start"].tap()
         let board = app.descendants(matching: .any)["alkkagi.board"]
         XCTAssertTrue(board.waitForExistence(timeout: 10))
+        XCTAssertGreaterThan(board.frame.width, app.frame.width * 0.96, "17줄 판이 화면 폭을 충분히 써야 한다")
+        XCTAssertEqual(app.staticTexts["header.status"].label, "1R · 클래식")
+        XCTAssertTrue(app.descendants(matching: .any)["players.seat.0"].label.contains("0승"))
         let turn = app.staticTexts["header.turn"]
         // 배치 단계: 기본 배치 그대로 흑이 놓고, 이어서 백이 놓으면 흑부터 튕긴다
         let done = app.buttons["alkkagi.placeDone"]
@@ -24,9 +27,14 @@ final class AlkkagiUITests: XCTestCase {
         XCTAssertEqual(wait(until: { done.isEnabled }), .completed, "배치 완료가 다시 열리지 않았다")
         done.tap()
         XCTAssertEqual(wait(until: { turn.label == "흑 차례" }), .completed, "둘 다 놓았는데 흑 차례가 오지 않았다: \(turn.label)")
-        // 흑 돌 2(6000, 2000)는 판의 x 중앙, 아래에서 2.5/13 지점(여백 반 칸 + 2칸)/13칸 → 정규화 y = 1 - 2.5/13
-        let stone = board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1 - 2.5 / 13))
-        let pullTo = board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1 - 0.5 / 13))   // 아래로 2칸 당김
+        XCTAssertEqual(wait(until: { !app.descendants(matching: .any)["turn.banner"].exists }), .completed)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Alkkagi-17-lines-round-1"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        // 흑 돌 2(8000, 3000). 16칸 + 양쪽 여백 0.4칸, 아래로 2칸 당긴다.
+        let stone = board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1 - 3.4 / 16.8))
+        let pullTo = board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1 - 1.4 / 16.8))
         stone.press(forDuration: 0.1, thenDragTo: pullTo)
         XCTAssertEqual(wait(until: { turn.label == "백 차례" }, timeout: 8), .completed, "튕긴 뒤 차례가 바뀌지 않았다: \(turn.label)")
         app.buttons["header.menu"].tap()

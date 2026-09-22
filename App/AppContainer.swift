@@ -172,10 +172,7 @@ final class AppContainer {
     /// 기록을 읽어 오목 판을 연다. 규칙에 어긋나는 로그면 열지 않고 이유를 남긴 채 거짓이다.
     @discardableResult
     private func launchOmok(_ record: MatchRecord, transport: (any TurnTransport)?) -> Bool {
-        guard let data = record.moveLog, let log = try? MoveLog<Omok>.decoded(from: data) else {
-            onlineError = "오목 기록을 읽을 수 없다"
-            return false
-        }
+        guard let log = readMoveLog(record, game: Omok.self) else { return false }
         // 좌석 수가 어긋난 기록은 `OnlineMatch`의 precondition에 걸려 앱이 죽는다. 여기서 돌려보낸다.
         guard record.participants.count == Omok.seatCount else {
             onlineError = "오목 기록의 자리 수가 맞지 않다"
@@ -210,10 +207,7 @@ final class AppContainer {
     /// 기록을 읽어 컵퐁 판을 연다. 규칙에 어긋나는 로그면 열지 않고 이유를 남긴 채 거짓이다.
     @discardableResult
     private func launchCupPong(_ record: MatchRecord, transport: (any TurnTransport)?) -> Bool {
-        guard let data = record.moveLog, let log = try? MoveLog<CupPong>.decoded(from: data) else {
-            onlineError = "컵퐁 기록을 읽을 수 없다"
-            return false
-        }
+        guard let log = readMoveLog(record, game: CupPong.self) else { return false }
         // 좌석 수가 어긋난 기록은 `OnlineMatch`의 precondition에 걸려 앱이 죽는다. 여기서 돌려보낸다.
         guard record.participants.count == CupPong.seatCount else {
             onlineError = "컵퐁 기록의 자리 수가 맞지 않다"
@@ -248,10 +242,7 @@ final class AppContainer {
     /// 기록을 읽어 알까기 판을 연다. 규칙에 어긋나는 로그면 열지 않고 이유를 남긴 채 거짓이다.
     @discardableResult
     private func launchAlkkagi(_ record: MatchRecord, transport: (any TurnTransport)?) -> Bool {
-        guard let data = record.moveLog, let log = try? MoveLog<Alkkagi>.decoded(from: data) else {
-            onlineError = "알까기 기록을 읽을 수 없다"
-            return false
-        }
+        guard let log = readMoveLog(record, game: Alkkagi.self) else { return false }
         // 좌석 수가 어긋난 기록은 `OnlineMatch`의 precondition에 걸려 앱이 죽는다. 여기서 돌려보낸다.
         guard record.participants.count == Alkkagi.seatCount else {
             onlineError = "알까기 기록의 자리 수가 맞지 않다"
@@ -320,6 +311,21 @@ final class AppContainer {
             onlineError = "아직 지원하지 않는 게임이다: \(row.game)"
             return false
         }
+    }
+
+    private func readMoveLog<G: Game>(_ record: MatchRecord, game: G.Type) -> MoveLog<G>? {
+        guard let data = record.moveLog else {
+            onlineError = "\(G.displayName) 기록을 읽을 수 없습니다."
+            return nil
+        }
+        do {
+            return try MoveLog<G>.decoded(from: data)
+        } catch let error as RulesVersionError {
+            onlineError = error.localizedDescription
+        } catch {
+            onlineError = "\(G.displayName) 기록을 읽을 수 없습니다."
+        }
+        return nil
     }
 
     /// GameKit 객체 없이 테스트할 수 있는 핵심. 성공하면 참.

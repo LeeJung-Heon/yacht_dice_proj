@@ -1,11 +1,11 @@
 import Foundation
 
-/// 15×15 오목. 흑(좌석 0)이 먼저, 5개 이상 이으면 승리, 금수 없음, 판이 차면 무승부.
+/// 19×19 오목. 흑(좌석 0)이 먼저, 5개 이상 이으면 승리, 금수 없음, 판이 차면 무승부.
 public enum Omok: Game {
     public static let id = "omok"
     public static let displayName = "오목"
     public static let seatCount = 2
-    public static let size = 15
+    public static let size = 19
 
     public struct Move: Codable, Equatable, Sendable {
         public let x: Int

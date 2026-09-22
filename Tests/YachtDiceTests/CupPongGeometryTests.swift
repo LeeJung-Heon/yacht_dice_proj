@@ -27,14 +27,19 @@ struct CupPongGeometryTests {
         #expect(abs(fast - slow) <= slow * 15 / 100 + 1)
     }
 
-    @Test("공은 던지는 곳에서 출발해 착지점에 닿고 중간에 가장 높다")
-    func 포물선() {
-        let landing = CupPong.Landing(x: 200, y: 2400, cup: nil)
-        let start = CupPongGeometry.ballPath(to: landing, progress: 0)
-        let mid = CupPongGeometry.ballPath(to: landing, progress: 0.5)
-        let end = CupPongGeometry.ballPath(to: landing, progress: 1)
-        #expect(start.x == 0 && start.y == 0 && start.height == 0)
-        #expect(end.x == 200 && end.y == 2400 && end.height == 0)
-        #expect(mid.height > start.height && mid.height > end.height)
+    @Test("충돌 프레임 사이를 시간으로 보간하고 마지막 표본에 멈춘다")
+    func collisionInterpolation() throws {
+        let frames = [CupPong.Frame(step: 0, x: 0, y: 0, height: 80),
+                      CupPong.Frame(step: 4, x: 40, y: 80, height: 35),
+                      CupPong.Frame(step: 8, x: 80, y: 160, height: 70)]
+        let falling = try #require(CupPongGeometry.ballFrame(in: frames, at: 2.0 / 240))
+        #expect(falling.x == 20 && falling.y == 40 && abs(falling.height - 57.5) < 0.001)
+        let bounce = try #require(CupPongGeometry.ballFrame(in: frames, at: 4.0 / 240))
+        #expect(bounce.height == 35)
+        let rising = try #require(CupPongGeometry.ballFrame(in: frames, at: 6.0 / 240))
+        #expect(rising.height == 52.5)
+        let end = try #require(CupPongGeometry.ballFrame(in: frames, at: 9))
+        #expect(end.x == 80 && end.y == 160 && end.height == 70)
+        #expect(CupPongGeometry.ballFrame(in: [], at: 0) == nil)
     }
 }

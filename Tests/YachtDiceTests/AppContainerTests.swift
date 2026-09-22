@@ -63,7 +63,7 @@ struct AppContainerTests {
         let (store, directory) = try makeStore()
         defer { try? FileManager.default.removeItem(at: directory) }
         // 같은 자리에 두 번 둔 로그라 재적용에서 거부된다
-        let 깨진_로그 = Data(#"{"moves":[{"x":7,"y":7},{"x":7,"y":7}]}"#.utf8)
+        let 깨진_로그 = Data(#"{"rulesVersion":2,"moves":[{"x":7,"y":7},{"x":7,"y":7}]}"#.utf8)
         try store.save(MatchRecord(game: Omok.id, mode: .passAndPlay(names: ["갑", "을"]),
                                    participants: [.human(name: "갑"), .human(name: "을")], moveLog: 깨진_로그))
         let container = AppContainer(store: store, arguments: [])
