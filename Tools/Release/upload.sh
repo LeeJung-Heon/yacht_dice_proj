@@ -1,16 +1,18 @@
 #!/bin/zsh
 # TestFlight 업로드. 아카이브 → App Store Connect 업로드까지 한 번에 한다.
 #
-# 인증은 둘 중 하나다.
-#   1) Xcode → Settings → Accounts에 팀의 Apple ID가 로그인돼 있다.
-#        DEVELOPMENT_TEAM=9P8KX3RJRR Tools/Release/upload.sh
-#   2) App Store Connect API 키 (Users and Access → Integrations → Team Keys, 역할 App Manager).
-#      .p8 파일은 한 번만 내려받을 수 있다.
-#        DEVELOPMENT_TEAM=9P8KX3RJRR ASC_KEY_PATH=~/AuthKey_XXXX.p8 ASC_KEY_ID=XXXX ASC_ISSUER_ID=... Tools/Release/upload.sh
+# 인증은 App Store Connect API 키(Users and Access → Integrations → Team Keys)로 한다.
+# 역할이 Admin이면 아카이브 내보내기의 클라우드 서명까지 키만으로 되고, App Manager면 내보내기는
+# Xcode → Settings → Accounts에 로그인된 팀 계정으로 되돌아간다. .p8 파일은 한 번만 내려받을 수 있다.
+#
+# 키는 git이 무시하는 Tools/Release/keys/AuthKey_<KEY_ID>.p8 에 두면 자동으로 찾는다(Tools/Release/env.sh).
+#   DEVELOPMENT_TEAM=9P8KX3RJRR Tools/Release/upload.sh
+# 다른 곳의 키를 쓰려면 ASC_KEY_PATH·ASC_KEY_ID·ASC_ISSUER_ID를 직접 준다.
 #
 # 업로드 뒤 App Store Connect의 TestFlight 탭에서 빌드 처리가 끝나기를 기다린 뒤 테스터 그룹에 붙인다.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
+source Tools/Release/env.sh
 : "${DEVELOPMENT_TEAM:?DEVELOPMENT_TEAM 환경 변수에 팀 ID를 넣는다}"
 OUT="${TMPDIR:-/tmp}/yacht-release"
 rm -rf "$OUT" && mkdir -p "$OUT"
@@ -26,7 +28,7 @@ xcodebuild -project YachtDice.xcodeproj -scheme YachtDice -configuration Release
   -destination 'generic/platform=iOS' -archivePath "$OUT/YachtDice.xcarchive" \
   -derivedDataPath "$OUT/dd" -allowProvisioningUpdates "${AUTH[@]}" archive | tail -3
 # 내보내기(배포 서명·업로드)는 클라우드 배포 인증서 권한이 필요한데 App Manager 키에는 없다.
-# 키로 먼저 시도하고 실패하면 Xcode에 로그인된 계정으로 다시 한다.
+# 키로 먼저 시도하고 실패하면 Xcode에 로그인된 계정으로 다시 한다(Admin 키면 첫 시도에 끝난다).
 if ! xcodebuild -exportArchive -archivePath "$OUT/YachtDice.xcarchive" \
   -exportOptionsPlist Tools/Release/ExportOptions.plist -exportPath "$OUT/export" \
   -allowProvisioningUpdates "${AUTH[@]}" | tail -5; then

@@ -36,8 +36,12 @@ Files: `supabase/migrations/20260922_game_rules_version.sql`, `Tests/YachtDiceTe
 - [x] 이번 규칙 버전 SQL만 트랜잭션으로 적용하고 마이그레이션 이력을 기록한다.
 - [x] 운영 E2E로 새 규칙의 생성·참가·턴·종료·사진 공유 및 구 규칙 참가 거부를 확인한다.
 - [x] 빌드 번호를 증가시키고 기능/문서 변경을 커밋하여 main으로 병합·push한다.
-- [ ] 팀 `9P8KX3RJRR`로 Release archive를 생성하고 TestFlight 업로드 후 처리 상태와 기존 테스트 그룹 연결을 확인한다. (아카이브 완료, 업로드 진행 중)
-- [ ] 실제 적용된 커밋·서버 변경·빌드·테스트 결과와 남은 외부 심사 상태를 기록한다.
+- [x] 팀 `9P8KX3RJRR`로 Release archive를 생성하고 TestFlight 업로드 후 처리 상태와 기존 테스트 그룹 연결을 확인한다.
+- [x] 실제 적용된 커밋·서버 변경·빌드·테스트 결과와 남은 외부 심사 상태를 기록한다.
+
+### 릴리스 기록 (2026-09-22)
+
+main `a5d0a6c`(머지 `849116d`)를 빌드 1.0 (11)로 아카이브했다. 내보내기는 Xcode 계정 세션이 만료되어 두 번 실패했고, App Store Connect API 키를 새로 만들어(`P5KWZAUGDH`, Admin) `Tools/Release/keys/`에 두고 키만으로 업로드했다. 빌드는 16:11(KST)에 올라가 처리(VALID)를 마쳤고, 한국어 테스트 노트를 넣었으며 외부 그룹 Tester(`5bcb4a46-…`)에 붙였고 내부 그룹은 자동 배포로 이미 연결돼 있다. Beta App Review에 제출해 `WAITING_FOR_REVIEW` 상태다. 규칙 버전 2 마이그레이션은 업로드 전에 운영 서버에 적용해 두었다. 이전 빌드 9·10의 만료는 자동 모드 권한에 막혀 하지 않았으므로 App Store Connect에서 손으로 만료시킨다.
 
 Run E2E: `TEST_RUNNER_YACHT_SUPABASE_E2E=1 xcodebuild -project YachtDice.xcodeproj -scheme YachtDice -destination id=63BF8F36-C5CC-4CFB-8C3A-C9A6E9B345BB -derivedDataPath /tmp/realistic-games-dd -collect-test-diagnostics never -only-testing:YachtDiceTests/SupabaseE2ETests -only-testing:YachtDiceTests/CupPongPhotoE2ETests test`
 

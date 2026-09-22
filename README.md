@@ -115,7 +115,7 @@ SwiftUI Views ──관찰──▶ GameSession  (@Observable, @MainActor)
    DEVELOPMENT_TEAM=ABCDE12345 Tools/Release/upload.sh
    ```
 
-   스크립트는 Xcode → Settings → Accounts에 팀의 Apple ID가 로그인돼 있어야 서명하며, 로그인 없이 터미널만으로 돌리려면 App Store Connect의 Users and Access → Integrations → Team Keys에서 App Manager 역할의 API 키를 만들어 `ASC_KEY_PATH`(.p8 경로), `ASC_KEY_ID`, `ASC_ISSUER_ID`를 함께 준다. Xcode에서 직접 하려면 실행 대상을 Any iOS Device로 두고 Product → Archive 뒤 Organizer에서 Distribute App → App Store Connect → Upload를 고르면 같다.
+   서명과 업로드는 App Store Connect의 Users and Access → Integrations → Team Keys에서 만든 API 키로 하며, 내려받은 `AuthKey_<KEY_ID>.p8`을 git이 무시하는 `Tools/Release/keys/`에 두면 `Tools/Release/env.sh`가 찾아 `ASC_KEY_PATH`·`ASC_KEY_ID`·`ASC_ISSUER_ID`를 채운다. 역할이 Admin이면 키만으로 끝나고, App Manager면 내보내기 단계가 Xcode → Settings → Accounts에 로그인된 팀 계정으로 되돌아가므로 그 세션이 살아 있어야 한다. .p8은 한 번만 내려받을 수 있으니 잃으면 키를 새로 만든다. Xcode에서 직접 하려면 실행 대상을 Any iOS Device로 두고 Product → Archive 뒤 Organizer에서 Distribute App → App Store Connect → Upload를 고르면 같다.
    API 키가 있으면 TestFlight 설정도 터미널에서 할 수 있는데, `Tools/Release/asc.swift`가 ES256 JWT를 만들어 App Store Connect API를 그대로 호출하므로 `swift Tools/Release/asc.swift get /v1/apps` 처럼 앱·빌드·베타 그룹·테스터·심사 상태를 읽고 `post`/`patch`로 바꿀 수 있다.
 4. App Store Connect → TestFlight 탭에서 빌드 처리가 끝나면(보통 10분 안쪽) 외부 테스트 그룹을 만들고 Test Information에 연락처 이메일과 개인정보처리방침 URL(`docs/privacy-policy.md`를 GitHub Pages나 저장소 링크로)을 넣은 뒤 빌드를 그룹에 붙이면 첫 빌드는 간단한 Beta App Review를 거친다.
 5. 그룹의 Public Link를 켜 링크를 나누면 받는 사람은 TestFlight 앱을 설치하고 링크를 눌러 받으며, 빌드는 90일 뒤 만료되고 새 빌드를 올릴 때는 `project.yml`의 `CURRENT_PROJECT_VERSION`을 1 올린다.
