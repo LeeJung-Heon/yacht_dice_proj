@@ -16,8 +16,21 @@ struct OmokTests {
     @Test("빈 판은 흑(좌석 0) 차례이고 끝나지 않았다")
     func 초기() {
         let s = Omok.initial()
-        #expect(s.cells.count == 225 && s.cells.allSatisfy { $0 == 0 })
+        #expect(s.cells.count == 361 && s.cells.allSatisfy { $0 == 0 })
         #expect(Omok.currentSeat(s) == 0 && Omok.outcome(s) == nil)
+    }
+
+    @Test("19번째 열의 끝까지 착수하고 다섯 돌을 이으면 승리한다")
+    func 확장한_가장자리_승리() throws {
+        var state = Omok.initial()
+        for (x, y) in [(18, 14), (0, 0), (18, 15), (2, 0), (18, 16), (4, 0), (18, 17), (6, 0), (18, 18)] {
+            let move = Omok.Move(x: x, y: y)
+            try #require(Omok.canApply(move, to: state), "확장된 판의 교차점에 착수할 수 있어야 한다")
+            state = Omok.apply(move, to: state)
+        }
+        #expect(state.stone(x: 18, y: 18) == 1)
+        #expect(Omok.outcome(state) == .win(seat: 0))
+        #expect(Omok.currentSeat(state) == nil)
     }
 
     @Test("가로 5목이면 흑이 이긴다")
@@ -44,7 +57,8 @@ struct OmokTests {
     @Test("찬 칸·범위 밖·끝난 판에는 둘 수 없다")
     func 검증() {
         var s = Omok.initial()
-        #expect(!Omok.canApply(Omok.Move(x: 15, y: 0), to: s))
+        #expect(!Omok.canApply(Omok.Move(x: 19, y: 0), to: s))
+        #expect(!Omok.canApply(Omok.Move(x: 0, y: 19), to: s))
         #expect(!Omok.canApply(Omok.Move(x: -1, y: 3), to: s))
         s = Omok.apply(Omok.Move(x: 7, y: 7), to: s)
         #expect(!Omok.canApply(Omok.Move(x: 7, y: 7), to: s))
@@ -53,7 +67,7 @@ struct OmokTests {
         #expect(!Omok.canApply(Omok.Move(x: 9, y: 9), to: done))
     }
 
-    @Test("225수가 차면 무승부다")
+    @Test("361수가 차면 무승부다")
     func 무승부() {
         // 5목이 생기지 않는 배열: 행마다 2칸씩 색을 바꿔 채운다(흑흑백백…), 행이 바뀔 때 한 칸 밀어 세로·대각도 끊는다
         var s = Omok.initial()
@@ -61,7 +75,7 @@ struct OmokTests {
         var placed = 0
         // 같은 색이 가로 최대 2, 세로·대각 최대 2가 되도록 색 지도를 만들고, 차례에 맞는 색이 남아 있는 칸을 고른다
         func color(_ x: Int, _ y: Int) -> Int { (((x + 2 * y) / 2) % 2) }
-        var free = (0..<225).map { ($0 % 15, $0 / 15) }
+        var free = (0..<361).map { ($0 % 19, $0 / 19) }
         while !free.isEmpty {
             guard let i = free.firstIndex(where: { color($0.0, $0.1) == seat }) ?? free.indices.first else { break }
             let (x, y) = free.remove(at: i)
@@ -72,6 +86,6 @@ struct OmokTests {
             if Omok.outcome(s) != nil { break }
             seat = 1 - seat
         }
-        #expect(placed == 225 && Omok.outcome(s) == .draw, "놓은 수 \(placed), 결과 \(String(describing: Omok.outcome(s)))")
+        #expect(placed == 361 && Omok.outcome(s) == .draw, "놓은 수 \(placed), 결과 \(String(describing: Omok.outcome(s)))")
     }
 }

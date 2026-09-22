@@ -15,7 +15,7 @@ struct AlkkagiMenu: View {
                     VStack(spacing: 14) {
                         VStack(spacing: 6) {
                             Text("알까기").font(.system(.largeTitle, design: .serif, weight: .semibold)).foregroundStyle(theme.ivory)
-                            Text("돌을 튕겨 밀어낸다").font(.caption.weight(.semibold)).tracking(2).foregroundStyle(theme.brass)
+                            Text("세 가지 맵 · 3판 2선승").font(.caption.weight(.semibold)).tracking(2).foregroundStyle(theme.brass)
                         }.padding(.top, 8).padding(.bottom, 10)
                         if let saved = container.savedRecord, saved.game == "alkkagi" {
                             ModeCard(icon: "bookmark.fill", title: "이어하기", subtitle: saved.mode.title, identifier: "menu.resume") {

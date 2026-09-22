@@ -1,12 +1,12 @@
 import Foundation
 import GameCore
 
-/// 격자(0…12000) ↔ 화면. 판은 정사각형에 맞추고 바깥 여백은 반 칸이다. 규칙은 화면을 모른다.
+/// 격자(0…16000) ↔ 화면. 판의 여백은 돌 반지름만큼만 남긴다. 규칙은 화면을 모른다.
 enum AlkkagiGeometry {
     static let maxPull = 3200
     static let minPull = 200
-    /// 판 가장자리 바깥으로 남기는 여백. 반 칸이면 가장자리 돌이 판에 얹히면서도 판이 화면을 거의 다 쓴다.
-    static let margin = Alkkagi.spacing / 2
+    /// 돌 전체가 보이는 최소 여백. 넓어진 교차점 영역이 화면 폭의 95%를 쓴다.
+    static let margin = Alkkagi.stoneRadius
     /// 격자 단위 하나가 화면에서 몇 pt인지.
     static func unit(in size: CGSize) -> CGFloat {
         min(size.width, size.height) / CGFloat(Alkkagi.boardMax + 2 * margin)
@@ -62,6 +62,41 @@ enum AlkkagiGeometry {
         let len = Alkkagi.isqrt(gx * gx + gy * gy)
         guard len > maxPull else { return finger }
         return Alkkagi.Point(x: origin.x + gx * maxPull / len, y: origin.y + gy * maxPull / len)
+    }
+
+    /// 방향과 세기만 가늠하는 짧은 힌트. 실제 수의 시뮬레이션·힘·판정은 바꾸지 않는다.
+    /// 최대 2.5칸·0.2초·전체 이동 거리의 1/3 중 먼저 닿는 곳까지, 첫 접촉 전 프레임만 보인다.
+    static func preview(state: Alkkagi.State, flick: Alkkagi.Flick) -> [Alkkagi.Point] {
+        guard Alkkagi.canApply(.flick(flick), to: state), let seat = Alkkagi.currentSeat(state) else { return [] }
+        let simulation = Alkkagi.simulate(state, flick)
+        let positions = simulation.frames.compactMap { $0.stones[seat][flick.stone] }
+        guard let first = positions.first else { return [] }
+        func distance(_ a: Alkkagi.Point, _ b: Alkkagi.Point) -> Double {
+            hypot(Double(b.x - a.x), Double(b.y - a.y))
+        }
+        let totalDistance = zip(positions, positions.dropFirst()).reduce(0.0) { $0 + distance($1.0, $1.1) }
+        let distanceLimit = min(2500, totalDistance / 3)
+        guard distanceLimit >= 1 else { return [] }
+        let lastStep = min(Alkkagi.stepsPerSecond / 5, (simulation.events.first?.step ?? Int.max) - 1)
+        var result = [first]
+        var travelled = 0.0
+        for (index, frame) in simulation.frames.enumerated().dropFirst() {
+            let step = index == simulation.frames.count - 1 ? simulation.steps : index * Alkkagi.frameEvery
+            guard step <= lastStep, let point = frame.stones[seat][flick.stone], let previous = result.last else { break }
+            let segment = distance(previous, point)
+            guard segment > 0 else { continue }
+            let remaining = distanceLimit - travelled
+            if segment >= remaining {
+                let fraction = remaining / segment
+                let end = Alkkagi.Point(x: previous.x + Int(Double(point.x - previous.x) * fraction),
+                                       y: previous.y + Int(Double(point.y - previous.y) * fraction))
+                if end != previous { result.append(end) }
+                break
+            }
+            result.append(point)
+            travelled += segment
+        }
+        return result.count > 1 ? result : []
     }
 
     /// 돌에서 손가락까지의 격자 벡터가 당김이다. 힘은 반대 방향으로, 길이에 비례한다.

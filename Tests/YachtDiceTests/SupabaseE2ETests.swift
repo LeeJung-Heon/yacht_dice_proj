@@ -33,6 +33,78 @@ struct SupabaseE2ETests {
         var incoming: AsyncStream<Event> { AsyncStream { $0.finish() } }
     }
 
+    private func rulesVersion(in row: MatchRow) throws -> Int? {
+        let object = try #require(JSONSerialization.jsonObject(with: row.log) as? [String: Any])
+        return object["rulesVersion"] as? Int
+    }
+
+    @Test("세 게임 모두 구버전 참가와 진행 중 규칙 덮어쓰기를 거부하며 기존 방도 보존한다")
+    func 규칙_버전_호환성() async throws {
+        // 익명 계정 생성 제한을 소모하지 않도록 세 게임에서 같은 두 계정을 쓴다.
+        let host = SupabaseService(client: makeClient())
+        let guest = SupabaseService(client: makeClient())
+        await host.signIn(); await guest.signIn()
+        let hostUid = try #require(host.uid)
+        var ownedRooms: [UUID] = []
+        do {
+            for game in ["omok", "cuppong", "alkkagi"] {
+                let room = try await host.createRoom(name: "규칙 호스트", game: game)
+                ownedRooms.append(room.id)
+                #expect(try rulesVersion(in: room) == 2)
+                // 구형 앱은 p_rules_version과 p_game을 보내지 않는다.
+                do {
+                    let _: MatchRow = try await guest.client.rpc("join_match", params: [
+                        "p_code": room.code, "p_name": "구버전 게스트",
+                    ]).single().execute().value
+                    Issue.record("\(game): 구버전 앱이 새 규칙 방에 참가했다")
+                } catch let error as PostgrestError {
+                    #expect(error.message == "rules version mismatch", "다른 오류로 거부됐다: \(error)")
+                }
+                let untouched = try await host.fetchMatch(id: room.id)
+                #expect(untouched.isWaiting && untouched.guestUid == nil)
+                let joined = try await guest.joinRoom(code: room.code, name: "새 게스트", game: game)
+                #expect(joined.status == "playing" && joined.guestUid == guest.uid)
+                do {
+                    try await host.client.from("matches").update([
+                        "log": JSONValue.object(["rulesVersion": .number(1), "moves": .array([])]),
+                    ]).eq("id", value: room.id.uuidString).execute()
+                    Issue.record("\(game): 진행 중인 방을 구버전 규칙으로 바꿨다")
+                } catch let error as PostgrestError {
+                    #expect(error.message == "rules version is fixed", "다른 오류로 거부됐다: \(error)")
+                }
+                #expect(try rulesVersion(in: await host.fetchMatch(id: room.id)) == 2)
+                try await host.deleteMatch(id: room.id)
+                ownedRooms.removeLast()
+
+                // 삭제한 테스트 방의 코드만 재사용해 버전 필드가 없는 실제 구형 행을 만든다.
+                let legacy: MatchRow = try await host.client.from("matches").insert([
+                    "code": JSONValue.string(room.code), "host_uid": .string(hostUid.uuidString),
+                    "host_name": .string("구버전 호스트"), "game": .string(game),
+                    "log": .object(["moves": .array([])]),
+                ]).select().single().execute().value
+                ownedRooms.append(legacy.id)
+                do {
+                    _ = try await guest.joinRoom(code: legacy.code, name: "새 게스트", game: game)
+                    Issue.record("\(game): 새 앱이 기존 구형 방에 참가했다")
+                } catch SupabaseService.ServiceError.rulesVersionMismatch { }
+                let preserved = try await host.fetchMatch(id: legacy.id)
+                #expect(preserved.isWaiting && preserved.guestUid == nil)
+                #expect(try rulesVersion(in: preserved) == nil)
+                let oldJoined: MatchRow = try await guest.client.rpc("join_match", params: [
+                    "p_code": legacy.code, "p_name": "구버전 게스트",
+                ]).single().execute().value
+                #expect(oldJoined.status == "playing" && oldJoined.guestUid == guest.uid)
+                #expect(try rulesVersion(in: oldJoined) == nil)
+                try await host.deleteMatch(id: legacy.id)
+                ownedRooms.removeLast()
+            }
+        } catch {
+            // async defer 대신 오류 경로도 정리를 기다린다. 이 테스트가 생성한 UUID만 지운다.
+            for id in ownedRooms { try? await host.deleteMatch(id: id) }
+            throw error
+        }
+    }
+
     @Test("호스트가 방을 만들고 게스트가 들어가 한 턴씩 주고받는다")
     func 한_판_시작() async throws {
         let host = SupabaseService(client: makeClient())
@@ -256,116 +328,173 @@ struct SupabaseE2ETests {
         }
     }
 
-    @Test("오목 방을 만들고 들어가 다섯 수로 끝내면 winner_seat와 records가 남는다")
+    @Test("오목 19번째 줄에서 다섯 돌을 연결하면 양쪽과 서버에 승리가 남는다")
     func 오목_한_판() async throws {
         let host = SupabaseService(client: makeClient())
         let guest = SupabaseService(client: makeClient())
         await host.signIn(); await guest.signIn()
         let hostUid = try #require(host.uid), guestUid = try #require(guest.uid)
         let room = try await host.createRoom(name: "A", game: "omok", player: nil)
-        #expect(room.game == "omok")
-        let joined = try await guest.joinRoom(code: room.code, name: "B", player: nil)
-        let refreshed = try await host.fetchMatch(id: room.id)
-        let ta = SupabaseTurnTransport(client: host.client, matchID: room.id)
-        let tb = SupabaseTurnTransport(client: guest.client, matchID: room.id)
-        let a = OnlineMatch(game: Omok.self, mode: .online(matchID: room.id.uuidString),
-                            participants: seatParticipants(localID: hostUid.uuidString, players: refreshed.seats(localUid: hostUid)),
-                            log: MoveLog<Omok>(), transport: ta)
-        let b = OnlineMatch(game: Omok.self, mode: .online(matchID: room.id.uuidString),
-                            participants: seatParticipants(localID: guestUid.uuidString, players: joined.seats(localUid: guestUid)),
-                            log: MoveLog<Omok>(), transport: tb)
-        a.startListening(); b.startListening()
-        let deadline = ContinuousClock.now + .seconds(8)
-        while !(ta.isSubscribed && tb.isSubscribed), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(100)) }
-        let moves: [(OnlineMatch<Omok>, Int, Int)] = [(a,0,0),(b,0,1),(a,1,0),(b,1,1),(a,2,0),(b,2,1),(a,3,0),(b,3,1),(a,4,0)]
-        for (m, x, y) in moves {
-            #expect(await m.play(Omok.Move(x: x, y: y)), "\(x),\(y) 실패: \(m.lastTransportError ?? "")")
-            let other = m === a ? b : a
-            let d = ContinuousClock.now + .seconds(10)
-            while other.log.moves.count != m.log.moves.count, ContinuousClock.now < d { try await Task.sleep(for: .milliseconds(50)) }
-            #expect(other.log.moves.count == m.log.moves.count, "상대에게 수가 가지 않았다")
+        do {
+            #expect(room.game == "omok")
+            #expect(try rulesVersion(in: room) == 2)
+            let joined = try await guest.joinRoom(code: room.code, name: "B", game: "omok", player: nil)
+            let refreshed = try await host.fetchMatch(id: room.id)
+            let ta = SupabaseTurnTransport(client: host.client, matchID: room.id)
+            let tb = SupabaseTurnTransport(client: guest.client, matchID: room.id)
+            let a = OnlineMatch(game: Omok.self, mode: .online(matchID: room.id.uuidString),
+                                participants: seatParticipants(localID: hostUid.uuidString, players: refreshed.seats(localUid: hostUid)),
+                                log: MoveLog<Omok>(), transport: ta)
+            let b = OnlineMatch(game: Omok.self, mode: .online(matchID: room.id.uuidString),
+                                participants: seatParticipants(localID: guestUid.uuidString, players: joined.seats(localUid: guestUid)),
+                                log: MoveLog<Omok>(), transport: tb)
+            a.startListening(); b.startListening()
+            defer { a.stop(); b.stop() }
+            let deadline = ContinuousClock.now + .seconds(8)
+            while !(ta.isSubscribed && tb.isSubscribed), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(100)) }
+            // x·y = 18은 이전 15줄 판에서 둘 수 없었던 19번째 교차점이다.
+            let moves: [(OnlineMatch<Omok>, Int, Int)] = [(a,14,18),(b,0,17),(a,15,18),(b,1,17),(a,16,18),(b,2,17),(a,17,18),(b,3,17),(a,18,18)]
+            for (m, x, y) in moves {
+                #expect(await m.play(Omok.Move(x: x, y: y)), "\(x),\(y) 실패: \(m.lastTransportError ?? "")")
+                let other = m === a ? b : a
+                let d = ContinuousClock.now + .seconds(10)
+                while other.log.moves.count != m.log.moves.count, ContinuousClock.now < d { try await Task.sleep(for: .milliseconds(50)) }
+                #expect(other.log.moves.count == m.log.moves.count, "상대에게 수가 가지 않았다")
+            }
+            #expect(a.outcome == .win(seat: 0) && b.outcome == .win(seat: 0))
+            let final = try await host.fetchMatch(id: room.id)
+            #expect(final.status == "finished" && final.winnerSeat == 0)
+            #expect(try MoveLog<Omok>.decoded(from: final.log) == a.log)
+            // 끝난 판은 더 못 바꾼다
+            await #expect(throws: (any Error).self) {
+                try await ta.publish(TurnPayload(log: final.log, eventCount: 9, hints: [], turnSeat: 1, winnerSeat: nil, finished: false))
+            }
+            let records = await host.fetchRecords(player: try #require(RecordsStore.playerKey(playerID: nil, uid: hostUid)))
+            #expect(records?.first { $0.game == "omok" }?.wins == 1)
+            let theirs = await guest.fetchRecords(player: try #require(RecordsStore.playerKey(playerID: nil, uid: guestUid)))
+            #expect(theirs?.first { $0.game == "omok" }?.losses == 1)
+            try await host.deleteMatch(id: room.id)
+        } catch {
+            try? await host.deleteMatch(id: room.id)
+            throw error
         }
-        #expect(a.outcome == .win(seat: 0) && b.outcome == .win(seat: 0))
-        let final = try await host.fetchMatch(id: room.id)
-        #expect(final.status == "finished" && final.winnerSeat == 0)
-        // 끝난 판은 더 못 바꾼다
-        await #expect(throws: (any Error).self) {
-            try await ta.publish(TurnPayload(log: final.log, eventCount: 9, hints: [], turnSeat: 1, winnerSeat: nil, finished: false))
-        }
-        let records = await host.fetchRecords(player: try #require(RecordsStore.playerKey(playerID: nil, uid: hostUid)))
-        #expect(records?.first { $0.game == "omok" }?.wins == 1)
-        let theirs = await guest.fetchRecords(player: try #require(RecordsStore.playerKey(playerID: nil, uid: guestUid)))
-        #expect(theirs?.first { $0.game == "omok" }?.losses == 1)
     }
 
-    @Test("컵퐁 방에서 열 번 맞혀 끝내면 winner_seat가 남는다")
+    @Test("컵퐁 바운드와 입구 충돌을 양쪽이 똑같이 재현하고 열 컵을 비우면 끝난다")
     func 컵퐁_한_판() async throws {
         let host = SupabaseService(client: makeClient())
         let guest = SupabaseService(client: makeClient())
         await host.signIn(); await guest.signIn()
         let hostUid = try #require(host.uid), guestUid = try #require(guest.uid)
         let room = try await host.createRoom(name: "A", game: "cuppong", player: nil)
-        let joined = try await guest.joinRoom(code: room.code, name: "B", player: nil)
-        let refreshed = try await host.fetchMatch(id: room.id)
-        let ta = SupabaseTurnTransport(client: host.client, matchID: room.id)
-        let tb = SupabaseTurnTransport(client: guest.client, matchID: room.id)
-        let a = OnlineMatch(game: CupPong.self, mode: .online(matchID: room.id.uuidString),
-                            participants: seatParticipants(localID: hostUid.uuidString, players: refreshed.seats(localUid: hostUid)),
-                            log: MoveLog<CupPong>(), transport: ta)
-        let b = OnlineMatch(game: CupPong.self, mode: .online(matchID: room.id.uuidString),
-                            participants: seatParticipants(localID: guestUid.uuidString, players: joined.seats(localUid: guestUid)),
-                            log: MoveLog<CupPong>(), transport: tb)
-        a.startListening(); b.startListening()
-        let deadline = ContinuousClock.now + .seconds(8)
-        while !(ta.isSubscribed && tb.isSubscribed), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(100)) }
-        let shots: [CupPong.Shot] = [
-            .init(dx: -207, power: 500), .init(dx: -69, power: 500), .init(dx: 69, power: 500), .init(dx: 207, power: 500),
-            .init(dx: -150, power: 450), .init(dx: 0, power: 450), .init(dx: 150, power: 450),
-            .init(dx: -81, power: 400), .init(dx: 81, power: 400), .init(dx: 0, power: 350),
-        ]
-        for shot in shots {
-            let ok = await a.play(shot)
-            #expect(ok, "\(shot) 실패: \(a.lastTransportError ?? "")")
-            let d = ContinuousClock.now + .seconds(10)
-            while b.log.moves.count != a.log.moves.count, ContinuousClock.now < d { try await Task.sleep(for: .milliseconds(50)) }
-            #expect(b.log.moves.count == a.log.moves.count, "상대에게 수가 가지 않았다")
+        do {
+            #expect(try rulesVersion(in: room) == 2)
+            let joined = try await guest.joinRoom(code: room.code, name: "B", game: "cuppong", player: nil)
+            let refreshed = try await host.fetchMatch(id: room.id)
+            let ta = SupabaseTurnTransport(client: host.client, matchID: room.id)
+            let tb = SupabaseTurnTransport(client: guest.client, matchID: room.id)
+            let a = OnlineMatch(game: CupPong.self, mode: .online(matchID: room.id.uuidString),
+                                participants: seatParticipants(localID: hostUid.uuidString, players: refreshed.seats(localUid: hostUid)),
+                                log: MoveLog<CupPong>(), transport: ta)
+            let b = OnlineMatch(game: CupPong.self, mode: .online(matchID: room.id.uuidString),
+                                participants: seatParticipants(localID: guestUid.uuidString, players: joined.seats(localUid: guestUid)),
+                                log: MoveLog<CupPong>(), transport: tb)
+            a.startListening(); b.startListening()
+            defer { a.stop(); b.stop() }
+            let deadline = ContinuousClock.now + .seconds(8)
+            while !(ta.isSubscribed && tb.isSubscribed), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(100)) }
+            // 양쪽이 한 번씩 짧게 던져 실제 바운드와 차례 이동도 네트워크로 검증한다.
+            for mover in [a, b] {
+                let other = mover === a ? b : a
+                let played = await mover.play(.init(dx: 0, power: 0))
+                #expect(played)
+                let d = ContinuousClock.now + .seconds(10)
+                while other.log.moves.count != mover.log.moves.count, ContinuousClock.now < d { try await Task.sleep(for: .milliseconds(50)) }
+                #expect(other.log.moves.count == mover.log.moves.count)
+                let simulation = try #require(mover.state.lastSimulation)
+                #expect(simulation.events.contains { $0.kind == .tableBounce })
+                #expect(simulation.landing.cup == nil)
+                #expect(other.state.lastSimulation == simulation)
+                #expect(other.isLocalTurn && !mover.isLocalTurn)
+            }
+            for (cup, shot) in CupPongMatchTests.winningShots.enumerated() {
+                let ok = await a.play(shot)
+                #expect(ok, "\(shot) 실패: \(a.lastTransportError ?? "")")
+                let d = ContinuousClock.now + .seconds(10)
+                while b.log.moves.count != a.log.moves.count, ContinuousClock.now < d { try await Task.sleep(for: .milliseconds(50)) }
+                #expect(b.log.moves.count == a.log.moves.count, "상대에게 수가 가지 않았다")
+                #expect(a.state.lastShot?.cup == cup && b.state.lastShot?.cup == cup)
+                let simulation = try #require(a.state.lastSimulation)
+                #expect(simulation.events.contains { $0.kind == .sunk(cup: cup) })
+                #expect(b.state.lastSimulation == simulation)
+            }
+            #expect(a.outcome == .win(seat: 0) && b.outcome == .win(seat: 0))
+            let final = try await host.fetchMatch(id: room.id)
+            #expect(final.status == "finished" && final.winnerSeat == 0 && final.game == "cuppong")
+            let replayed = try MoveLog<CupPong>.decoded(from: final.log)
+            #expect(replayed == a.log && final.eventCount == 12)
+            #expect(replayed.state.lastSimulation == a.state.lastSimulation)
+            try await host.deleteMatch(id: room.id)
+        } catch {
+            try? await host.deleteMatch(id: room.id)
+            throw error
         }
-        #expect(a.outcome == .win(seat: 0) && b.outcome == .win(seat: 0))
-        let final = try await host.fetchMatch(id: room.id)
-        #expect(final.status == "finished" && final.winnerSeat == 0 && final.game == "cuppong")
     }
 
-    @Test("알까기 방을 만들고 들어가 배치 두 수와 아홉 수로 끝내면 winner_seat가 남는다")
+    @Test("알까기는 첫 승리 뒤 맵을 바꾸고 두 번째 승리 후에만 매치 승자를 기록한다")
     func 알까기_한_판() async throws {
         let host = SupabaseService(client: makeClient())
         let guest = SupabaseService(client: makeClient())
         await host.signIn(); await guest.signIn()
         let hostUid = try #require(host.uid), guestUid = try #require(guest.uid)
         let room = try await host.createRoom(name: "A", game: "alkkagi", player: nil)
-        let joined = try await guest.joinRoom(code: room.code, name: "B", player: nil)
-        let refreshed = try await host.fetchMatch(id: room.id)
-        let ta = SupabaseTurnTransport(client: host.client, matchID: room.id)
-        let tb = SupabaseTurnTransport(client: guest.client, matchID: room.id)
-        let a = OnlineMatch(game: Alkkagi.self, mode: .online(matchID: room.id.uuidString),
-                            participants: seatParticipants(localID: hostUid.uuidString, players: refreshed.seats(localUid: hostUid)),
-                            log: MoveLog<Alkkagi>(), transport: ta)
-        let b = OnlineMatch(game: Alkkagi.self, mode: .online(matchID: room.id.uuidString),
-                            participants: seatParticipants(localID: guestUid.uuidString, players: joined.seats(localUid: guestUid)),
-                            log: MoveLog<Alkkagi>(), transport: tb)
-        a.startListening(); b.startListening()
-        let deadline = ContinuousClock.now + .seconds(8)
-        while !(ta.isSubscribed && tb.isSubscribed), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(100)) }
-        for (i, move) in AlkkagiMatchTests.winningMoves().enumerated() {
-            let mover = i % 2 == 0 ? a : b, other = i % 2 == 0 ? b : a
-            let ok = await mover.play(move)
-            #expect(ok, "\(i)번째 수 \(move) 실패: \(mover.lastTransportError ?? "")")
-            let d = ContinuousClock.now + .seconds(10)
-            while other.log.moves.count != mover.log.moves.count, ContinuousClock.now < d { try await Task.sleep(for: .milliseconds(50)) }
-            #expect(other.log.moves.count == mover.log.moves.count, "상대에게 수가 가지 않았다")
+        do {
+            #expect(try rulesVersion(in: room) == 2)
+            let joined = try await guest.joinRoom(code: room.code, name: "B", game: "alkkagi", player: nil)
+            let refreshed = try await host.fetchMatch(id: room.id)
+            let ta = SupabaseTurnTransport(client: host.client, matchID: room.id)
+            let tb = SupabaseTurnTransport(client: guest.client, matchID: room.id)
+            let a = OnlineMatch(game: Alkkagi.self, mode: .online(matchID: room.id.uuidString),
+                                participants: seatParticipants(localID: hostUid.uuidString, players: refreshed.seats(localUid: hostUid)),
+                                log: MoveLog<Alkkagi>(), transport: ta)
+            let b = OnlineMatch(game: Alkkagi.self, mode: .online(matchID: room.id.uuidString),
+                                participants: seatParticipants(localID: guestUid.uuidString, players: joined.seats(localUid: guestUid)),
+                                log: MoveLog<Alkkagi>(), transport: tb)
+            a.startListening(); b.startListening()
+            defer { a.stop(); b.stop() }
+            let deadline = ContinuousClock.now + .seconds(8)
+            while !(ta.isSubscribed && tb.isSubscribed), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(100)) }
+            for (i, move) in AlkkagiMatchTests.winningMoves().enumerated() {
+                // 다음 라운드 준비와 배치는 같은 좌석이 연속 진행할 수 있다.
+                let mover = a.isLocalTurn ? a : b, other = a.isLocalTurn ? b : a
+                let ok = await mover.play(move)
+                #expect(ok, "\(i)번째 수 \(move) 실패: \(mover.lastTransportError ?? "")")
+                let d = ContinuousClock.now + .seconds(10)
+                while other.log.moves.count != mover.log.moves.count, ContinuousClock.now < d { try await Task.sleep(for: .milliseconds(50)) }
+                #expect(other.log.moves.count == mover.log.moves.count, "상대에게 수가 가지 않았다")
+                #expect(a.state.roundNumber == b.state.roundNumber && a.state.roundWins == b.state.roundWins)
+                if i == 10 {
+                    #expect(a.outcome == nil && b.outcome == nil && a.state.roundWins == [1, 0])
+                    let firstRound = try await host.fetchMatch(id: room.id)
+                    #expect(firstRound.status == "playing" && firstRound.winnerSeat == nil)
+                    let saved = try MoveLog<Alkkagi>.decoded(from: firstRound.log)
+                    #expect(saved.state.roundWins == [1, 0] && !saved.isFinished)
+                }
+                if move == .nextRound {
+                    #expect(a.state.roundNumber == 2 && a.state.map == .cutCorners)
+                    #expect(b.state.map == .cutCorners && a.state.phase == .setup && b.state.phase == .setup)
+                }
+            }
+            #expect(a.outcome == .win(seat: 0) && b.outcome == .win(seat: 0))
+            let final = try await host.fetchMatch(id: room.id)
+            #expect(final.status == "finished" && final.winnerSeat == 0 && final.game == "alkkagi")
+            let replayed = try MoveLog<Alkkagi>.decoded(from: final.log)
+            #expect(replayed == a.log && replayed.state.roundWins == [2, 0])
+            try await host.deleteMatch(id: room.id)
+        } catch {
+            try? await host.deleteMatch(id: room.id)
+            throw error
         }
-        #expect(a.outcome == .win(seat: 0) && b.outcome == .win(seat: 0))
-        let final = try await host.fetchMatch(id: room.id)
-        #expect(final.status == "finished" && final.winnerSeat == 0 && final.game == "alkkagi")
     }
 
     @Test("연결된 플레이어로만 방을 만들고 들어갈 수 있다")
@@ -384,10 +513,10 @@ struct SupabaseE2ETests {
         #expect(room.hostPlayer == hostPlayer)
         // 게스트도 연결하지 않으면 거부되고, 연결하면 들어간다
         await #expect(throws: (any Error).self) {
-            _ = try await guest.joinRoom(code: room.code, name: "B", player: guestPlayer)
+            _ = try await guest.joinRoom(code: room.code, name: "B", game: "omok", player: guestPlayer)
         }
         await guest.upsertProfile(player: guestPlayer, name: "B")
-        let joined = try await guest.joinRoom(code: room.code, name: "B", player: guestPlayer)
+        let joined = try await guest.joinRoom(code: room.code, name: "B", game: "omok", player: guestPlayer)
         #expect(joined.guestPlayer == guestPlayer && joined.status == "playing")
         // 호스트는 연결된 플레이어 정책으로도 행을 읽는다
         let refreshed = try await host.fetchMatch(id: room.id)

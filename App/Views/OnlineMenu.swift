@@ -166,7 +166,7 @@ struct OnlineMenu: View {
 
     private var matchesCard: some View {
         // 대기 방은 위 카드가 보여주므로 목록에는 진행 중인 판만 둔다
-        let playing = service.myMatches.filter { !$0.isWaiting }
+        let playing = service.myMatches.filter { !$0.isWaiting && $0.game == game.rawValue }
         return VStack(alignment: .leading, spacing: 10) {
             Text("진행 중인 매치").font(.system(.headline, design: .serif)).foregroundStyle(theme.ink)
             if playing.isEmpty {
@@ -300,12 +300,13 @@ struct OnlineMenu: View {
         message = nil
         entryStatus = "입장 중…"
         do {
-            let row = try await service.joinRoom(code: codeInput, name: trimmedName,
+            let row = try await service.joinRoom(code: codeInput, name: trimmedName, game: game.rawValue,
                                                 player: service.linkedPlayer)
             await enterGame(row, announcing: "\(row.hostName)의 방에 들어왔다 — 게임을 시작한다")
         } catch {
             entryStatus = nil
-            message = "들어가지 못했다: 코드를 확인하거나 방이 이미 찼는지 본다"
+            message = (error as? SupabaseService.ServiceError)?.localizedDescription
+                ?? "들어가지 못했다: 코드를 확인하거나 방이 이미 찼는지 본다"
         }
     }
 

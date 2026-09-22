@@ -1,7 +1,7 @@
 import SwiftUI
 import GameCore
 
-/// 나무 판, 13×13 격자, 화점, 흑백 돌, 진영 음영, 당김 선과 화살표, 예상 궤적 점선. 배치만 받아 그린다.
+/// 넓은 17줄 판. 잘린 모서리와 중앙 범퍼는 물리 규칙과 같은 치수로 그린다.
 struct AlkkagiBoardView: View {
     let stones: [[Alkkagi.Point?]]
     var flipped = false
@@ -14,14 +14,39 @@ struct AlkkagiBoardView: View {
     var homeShade: ClosedRange<Int>?
     /// 배치 중에 끌고 있는 돌. 배치의 자리가 아니라 손끝에 그린다.
     var dragging: (seat: Int, stone: Int, at: Alkkagi.Point)?
+    var map: Alkkagi.Map = .classic
     private static let brass = Color(red: 0.72, green: 0.53, blue: 0.17)
 
     var body: some View {
         Canvas { context, size in
             let side = min(size.width, size.height)
             let origin = CGPoint(x: (size.width - side) / 2, y: (size.height - side) / 2)
-            context.fill(Path(CGRect(origin: origin, size: CGSize(width: side, height: side))),
-                         with: .color(Color(red: 0.86, green: 0.70, blue: 0.44)))
+            let margin = AlkkagiGeometry.margin
+            let limit = Alkkagi.boardMax
+            let cut = Alkkagi.cornerCut + margin
+            let surface: Path
+            if map == .cutCorners {
+                let outline: [Alkkagi.Point] = [
+                    .init(x: cut, y: -margin), .init(x: limit - cut, y: -margin),
+                    .init(x: limit + margin, y: cut), .init(x: limit + margin, y: limit - cut),
+                    .init(x: limit - cut, y: limit + margin), .init(x: cut, y: limit + margin),
+                    .init(x: -margin, y: limit - cut), .init(x: -margin, y: cut)
+                ]
+                surface = Path { path in
+                    for (index, point) in outline.enumerated() {
+                        let p = AlkkagiGeometry.project(point, in: size, flipped: flipped)
+                        if index == 0 { path.move(to: p) } else { path.addLine(to: p) }
+                    }
+                    path.closeSubpath()
+                }
+            } else {
+                surface = Path(CGRect(origin: origin, size: CGSize(width: side, height: side)))
+            }
+            context.fill(surface, with: .linearGradient(Gradient(colors: [
+                Color(red: 0.91, green: 0.76, blue: 0.51), Color(red: 0.76, green: 0.56, blue: 0.31)
+            ]), startPoint: origin, endPoint: CGPoint(x: origin.x + side, y: origin.y + side)))
+            context.stroke(surface, with: .color(Color(red: 0.33, green: 0.20, blue: 0.10)), lineWidth: 3)
+            context.clip(to: surface)
             if let homeShade {
                 // 진영은 줄에서 여백 반 칸만큼 더 나가 판 가장자리에 닿는다.
                 let m = AlkkagiGeometry.unit(in: size) * CGFloat(AlkkagiGeometry.margin)
@@ -40,17 +65,34 @@ struct AlkkagiBoardView: View {
                 grid.addLine(to: AlkkagiGeometry.project(.init(x: Alkkagi.boardMax, y: v), in: size, flipped: flipped))
             }
             context.stroke(grid, with: .color(.black.opacity(0.65)), lineWidth: 1)
-            for (x, y) in [(3, 3), (3, 9), (9, 3), (9, 9), (6, 6)] {
+            for (x, y) in [(4, 4), (4, 12), (12, 4), (12, 12), (8, 8)] {
                 let p = AlkkagiGeometry.project(.init(x: x * Alkkagi.spacing, y: y * Alkkagi.spacing), in: size, flipped: flipped)
                 context.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)), with: .color(.black.opacity(0.7)))
             }
-            if preview.count > 1 {
+            if map == .centerBumper {
+                let center = AlkkagiGeometry.project(.init(x: limit / 2, y: limit / 2), in: size, flipped: flipped)
+                let radius = CGFloat(Alkkagi.bumperRadius) * AlkkagiGeometry.unit(in: size)
+                let circle = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+                context.fill(Path(ellipseIn: circle.offsetBy(dx: 1, dy: 3)), with: .color(.black.opacity(0.4)))
+                context.fill(Path(ellipseIn: circle), with: .radialGradient(
+                    Gradient(colors: [Color(red: 0.48, green: 0.56, blue: 0.54), Color(red: 0.14, green: 0.23, blue: 0.22)]),
+                    center: CGPoint(x: center.x - radius * 0.3, y: center.y - radius * 0.4), startRadius: 0, endRadius: radius * 1.5))
+                context.stroke(Path(ellipseIn: circle.insetBy(dx: 2, dy: 2)), with: .color(Self.brass.opacity(0.9)), lineWidth: 2)
+                context.draw(Text("범퍼").font(.system(size: max(10, radius * 0.36), weight: .semibold)).foregroundColor(.white.opacity(0.9)), at: center)
+            }
+            if preview.count > 1, let first = preview.first, let last = preview.last {
                 var path = Path()
                 for (i, p) in preview.enumerated() {
                     let s = AlkkagiGeometry.project(p, in: size, flipped: flipped)
                     i == 0 ? path.move(to: s) : path.addLine(to: s)
                 }
-                context.stroke(path, with: .color(.white.opacity(0.85)), style: StrokeStyle(lineWidth: 2, dash: [5, 6]))
+                context.stroke(path, with: .linearGradient(
+                    Gradient(stops: [.init(color: .white.opacity(0.85), location: 0),
+                                     .init(color: .white.opacity(0.45), location: 0.5),
+                                     .init(color: .clear, location: 1)]),
+                    startPoint: AlkkagiGeometry.project(first, in: size, flipped: flipped),
+                    endPoint: AlkkagiGeometry.project(last, in: size, flipped: flipped)),
+                    style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [4, 5]))
             }
             let r = AlkkagiGeometry.stoneRadius(in: size)
             func drawStone(_ p: Alkkagi.Point, seat: Int, stone: Int) {
@@ -90,6 +132,6 @@ struct AlkkagiBoardView: View {
         .aspectRatio(1, contentMode: .fit)
         .accessibilityElement()
         .accessibilityIdentifier("alkkagi.board")
-        .accessibilityLabel("흑 \(stones[0].compactMap { $0 }.count) · 백 \(stones[1].compactMap { $0 }.count)")
+        .accessibilityLabel("17줄 \(map.title) 판, 흑 \(stones[0].compactMap { $0 }.count) · 백 \(stones[1].compactMap { $0 }.count)")
     }
 }

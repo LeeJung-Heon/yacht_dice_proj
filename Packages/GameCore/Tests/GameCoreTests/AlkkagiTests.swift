@@ -39,14 +39,14 @@ struct AlkkagiTests {
         // 개수가 다섯이 아니다
         #expect(!Alkkagi.placementIsValid(Array(기본.prefix(4)), seat: 0))
         #expect(!Alkkagi.placementIsValid(기본 + [P(x: 1000, y: 1000)], seat: 0))
-        // 제 진영 밖(좌석 0의 y는 0…5000)
-        #expect(!Alkkagi.placementIsValid([P(x: 4000, y: 6000)] + 기본.dropFirst(), seat: 0))
-        #expect(!Alkkagi.placementIsValid([P(x: 13000, y: 2000)] + 기본.dropFirst(), seat: 0))
+        // 제 진영 밖(좌석 0의 y는 0…7000)
+        #expect(!Alkkagi.placementIsValid([P(x: 4000, y: 8000)] + 기본.dropFirst(), seat: 0))
+        #expect(!Alkkagi.placementIsValid([P(x: 17000, y: 3000)] + 기본.dropFirst(), seat: 0))
         // 교차점이 아니다
         #expect(!Alkkagi.placementIsValid([P(x: 4500, y: 2000)] + 기본.dropFirst(), seat: 0))
         #expect(!Alkkagi.placementIsValid([P(x: 4000, y: 2500)] + 기본.dropFirst(), seat: 0))
         // 서로 800 미만으로 붙었다(같은 점은 거리 0)
-        #expect(!Alkkagi.placementIsValid([P(x: 5000, y: 2000)] + 기본.dropFirst(), seat: 0))
+        #expect(!Alkkagi.placementIsValid([P(x: 7000, y: 3000)] + 기본.dropFirst(), seat: 0))
         // 남의 진영에는 못 놓는다
         #expect(!Alkkagi.placementIsValid(Alkkagi.defaultPlacement(seat: 1), seat: 0))
         #expect(!Alkkagi.canApply(.setup(Alkkagi.defaultPlacement(seat: 1)), to: s))
@@ -72,8 +72,8 @@ struct AlkkagiTests {
     @Test("표준 시작은 두 기본 배치를 놓은 한 줄이다")
     func 표준_시작() {
         let s = Alkkagi.standardStart()
-        #expect(s.stones[0] == (0..<5).map { P(x: 4000 + $0 * 1000, y: 2000) })
-        #expect(s.stones[1] == (0..<5).map { P(x: 4000 + $0 * 1000, y: 10000) })
+        #expect(s.stones[0] == (0..<5).map { P(x: 6000 + $0 * 1000, y: 3000) })
+        #expect(s.stones[1] == (0..<5).map { P(x: 6000 + $0 * 1000, y: 13000) })
         #expect(s.phase == .play && s.placed == [true, true])
         #expect(Alkkagi.currentSeat(s) == 0 && s.remaining(seat: 0) == 5 && s.remaining(seat: 1) == 5)
     }
@@ -98,7 +98,7 @@ struct AlkkagiTests {
         let s = Alkkagi.standardStart()
         let sim = Alkkagi.simulate(s, .init(stone: 0, dx: -1000, dy: 0, power: 300))   // 속도 9000, 제동 거리 ≈ 3375
         let end = sim.final[0][0]!
-        #expect((500...800).contains(end.x) && end.y == 2000, "\(end)")
+        #expect((2500...2800).contains(end.x) && end.y == 3000, "\(end)")
         #expect(sim.events.isEmpty)
         #expect((20...26).contains(sim.frames.count), "프레임 \(sim.frames.count)")
         #expect(sim.frames.first?.stones == s.stones && sim.frames.last?.stones == sim.final)
@@ -106,7 +106,9 @@ struct AlkkagiTests {
 
     @Test("정면 충돌: 맞은 돌이 밀리고 친 돌이 거의 멈춘다")
     func 충돌() {
-        let s = Alkkagi.standardStart()
+        // 배치 간 거리를 고정해 반발 물리의 회귀만 검증한다.
+        let s = Alkkagi.State(stones: [(0..<5).map { P(x: 4000 + $0 * 1000, y: 2000) },
+                                      (0..<5).map { P(x: 4000 + $0 * 1000, y: 10000) }], nextSeat: 0, outcome: nil)
         let sim = Alkkagi.simulate(s, .init(stone: 2, dx: 0, dy: 1000, power: 450))   // 접촉 시 속도 ≈ 3000
         let black = sim.final[0][2]!, white = sim.final[1][2]!
         #expect(black == P(x: 6000, y: 9210), "흑 \(black)")
@@ -165,7 +167,7 @@ struct AlkkagiTests {
                               nextSeat: 0, outcome: nil)
         let next = Alkkagi.apply(.flick(.init(stone: 0, dx: 0, dy: 1000, power: 1000)), to: s)
         #expect(next.stones[0][0] == nil && next.stones[1][0] != nil)
-        #expect(Alkkagi.outcome(next) == .win(seat: 1))
+        #expect(next.roundOutcome == .win(seat: 1) && next.roundWins == [0, 1] && Alkkagi.outcome(next) == nil)
     }
 
     @Test("승패 규칙: 상대 0이면 승리, 둘 다 0이면 무승부, 아니면 차례 이동")
@@ -182,14 +184,15 @@ struct AlkkagiTests {
         #expect(d.outcome == nil && d.nextSeat == 1)
     }
 
-    @Test("배치 두 수와 아홉 수로 완주하면 좌석 0이 이긴다")
+    @Test("배치 두 수와 아홉 수로 첫 라운드를 이기면 1승을 얻는다")
     func 완주() {
         var s = Alkkagi.initial()
         for (i, m) in Self.winningMoves().enumerated() {
             #expect(Alkkagi.canApply(m, to: s), "\(i)번째 \(m)")
             s = Alkkagi.apply(m, to: s)
         }
-        #expect(Alkkagi.outcome(s) == .win(seat: 0), "남은 백 돌 \(s.remaining(seat: 1)), 흑 \(s.stones[0])")
+        #expect(s.roundOutcome == .win(seat: 0) && s.roundWins == [1, 0] && Alkkagi.outcome(s) == nil,
+                "남은 백 돌 \(s.remaining(seat: 1)), 흑 \(s.stones[0])")
     }
 
     @Test("남의 돌·빈 돌·범위 밖·힘 0은 거부한다")

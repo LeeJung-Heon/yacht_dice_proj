@@ -52,7 +52,11 @@ struct AlkkagiInterpolationTests {
     @Test("다음 프레임에서 사라질 돌은 그 칸이 끝날 때까지 제자리다")
     @MainActor
     func 떨어질_돌은_칸_끝까지() throws {
-        let sim = 한판
+        // 가장자리 가까이 붙은 두 돌. 맞은 돌이 먼저 떨어지고 친 돌은 아직 움직여,
+        // 낙하가 마지막 프레임보다 앞에 생기는 상황을 기본 배치와 무관하게 만든다.
+        let state = Alkkagi.State(stones: [[.init(x: 8000, y: 14000), nil, nil, nil, nil],
+                                          [.init(x: 8000, y: 14800), nil, nil, nil, nil]], nextSeat: 0, outcome: nil)
+        let sim = Alkkagi.simulate(state, .init(stone: 0, dx: 0, dy: 1000, power: 1000))
         // 앞 프레임에는 있고 다음 프레임에는 없는 첫 자리를 찾는다 — 날아가는 중에 떨어진 돌이다.
         var found: (seat: Int, stone: Int, frame: Int)?
         찾기: for k in 0..<(sim.frames.count - 1) {
@@ -74,5 +78,16 @@ struct AlkkagiInterpolationTests {
         }
         let 다음칸 = AlkkagiScreen.interpolated(sim, elapsedSteps: 칸머리 + Double(Alkkagi.frameEvery))
         #expect(다음칸[떨어진.seat][떨어진.stone] == nil, "다음 칸으로 넘어가면 사라진다")
+    }
+
+    @Test("마지막 짧은 프레임에서 낙하하면 실제 종료 스텝까지만 남는다")
+    @MainActor
+    func 마지막_낙하_짧은_프레임() throws {
+        let sim = 한판
+        #expect(sim.steps % Alkkagi.frameEvery != 0, "마지막 프레임이 4스텝보다 짧은 실제 시뮬레이션")
+        let before = try #require(sim.frames.dropLast().last?.stones[1][0])
+        #expect(sim.final[1][0] == nil)
+        #expect(AlkkagiScreen.interpolated(sim, elapsedSteps: Double(sim.steps) - 0.5)[1][0] == before)
+        #expect(AlkkagiScreen.interpolated(sim, elapsedSteps: Double(sim.steps))[1][0] == nil)
     }
 }

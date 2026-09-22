@@ -14,10 +14,11 @@ struct CupPongSceneTests {
         let store = CupPongCustomizationStore(directory: directory)
         var cups = Array(repeating: true, count: 10)
         cups[4] = false
-        scene.update(cups: cups, ball: (200, 2400, 0), vanishing: nil, customization: store)
+        scene.update(cups: cups, ball: (200, 2400, 350), vanishing: nil, customization: store)
         #expect(scene.root.findEntity(named: "cup.4")?.isEnabled == false)
         #expect(scene.root.findEntity(named: "cup.3")?.isEnabled == true)
         let ball = try #require(scene.root.findEntity(named: "ball"))
+        #expect(abs(ball.position.y - 0.14) < 0.0001)
         #expect(abs(ball.position.x - 0.08) < 0.0001)
         #expect(abs(ball.position.z + 0.96) < 0.0001)
         let front = try #require(scene.root.findEntity(named: "cup.9"))

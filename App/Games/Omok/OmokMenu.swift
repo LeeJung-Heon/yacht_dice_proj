@@ -15,7 +15,7 @@ struct OmokMenu: View {
                     VStack(spacing: 14) {
                         VStack(spacing: 6) {
                             Text("오목").font(.system(.largeTitle, design: .serif, weight: .semibold)).foregroundStyle(theme.ivory)
-                            Text("15×15 · 다섯을 먼저 잇는다").font(.caption.weight(.semibold)).tracking(2).foregroundStyle(theme.brass)
+                            Text("19×19 · 다섯을 먼저 잇는다").font(.caption.weight(.semibold)).tracking(2).foregroundStyle(theme.brass)
                         }.padding(.top, 8).padding(.bottom, 10)
                         if let saved = container.savedRecord, saved.game == "omok" {
                             ModeCard(icon: "bookmark.fill", title: "이어하기", subtitle: saved.mode.title, identifier: "menu.resume") {

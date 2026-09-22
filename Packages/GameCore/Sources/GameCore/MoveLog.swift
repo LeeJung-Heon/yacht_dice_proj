@@ -21,10 +21,14 @@ public struct MoveLog<G: Game>: Codable, Equatable, Sendable {
 
     public var isFinished: Bool { G.outcome(state) != nil }
 
-    enum CodingKeys: String, CodingKey { case moves }
+    enum CodingKeys: String, CodingKey { case rulesVersion, moves }
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let version = try container.decodeIfPresent(Int.self, forKey: .rulesVersion) ?? 1
+        guard version == G.rulesVersion else {
+            throw RulesVersionError(expected: G.rulesVersion, actual: version)
+        }
         let moves = try container.decode([G.Move].self, forKey: .moves)
         self.init()
         for (index, move) in moves.enumerated() {
@@ -37,6 +41,7 @@ public struct MoveLog<G: Game>: Codable, Equatable, Sendable {
 
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(G.rulesVersion, forKey: .rulesVersion)
         try container.encode(moves, forKey: .moves)
     }
 

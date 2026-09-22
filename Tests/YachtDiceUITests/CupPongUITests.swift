@@ -42,6 +42,8 @@ final class CupPongUITests: XCTestCase {
         // 이름 기본값이 나·상대라 첫 차례는 "나 차례"다. 던지기 전에 본다 — 공이 날아가는 0.9초와 겹치면 안 된다.
         let turn = app.staticTexts["header.turn"]
         XCTAssertEqual(turn.label, "나 차례")
+        let clearStage = NSPredicate { _, _ in !app.descendants(matching: .any)["turn.banner"].exists }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: clearStage, object: nil)], timeout: 5), .completed)
         let scene = XCTAttachment(screenshot: app.screenshot())
         scene.name = "CupPong 3D gameplay"
         scene.lifetime = .keepAlways
@@ -50,11 +52,11 @@ final class CupPongUITests: XCTestCase {
         let start = table.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95))
         let end = table.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
         start.press(forDuration: 0.05, thenDragTo: end)
-        // 공이 0.9초 날아간 뒤: 맞혔으면 상대 컵이 9가 되고, 빗나갔으면 차례가 "상대 차례"로 넘어간다
+        // 물리 재생이 끝난 뒤: 맞혔으면 상대 컵이 9가 되고, 빗나갔으면 차례가 "상대 차례"로 넘어간다
         let moved = NSPredicate { _, _ in
             status.label != "내 컵 10 · 상대 컵 10" || turn.label == "상대 차례"
         }
-        let outcome = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: moved, object: nil)], timeout: 5)
+        let outcome = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: moved, object: nil)], timeout: 8)
         XCTAssertEqual(outcome, .completed, "던진 뒤 상태가 바뀌지 않았다: \(status.label) / \(turn.label)")
         app.buttons["header.menu"].tap()
         XCTAssertTrue(app.buttons["menu.cuppong.local"].waitForExistence(timeout: 5))

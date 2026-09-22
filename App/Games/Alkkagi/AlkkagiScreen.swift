@@ -17,6 +17,7 @@ struct AlkkagiScreen: View {
     @State private var draft: (seat: Int, points: [Alkkagi.Point])?
     /// 한 기기에서 좌석이 넘어간 직후에는 "배치 완료"를 잠근다. 두 번 두드린 손가락이 다음 사람 몫까지 놓아 버린다.
     @State private var placeLocked = false
+    @State private var advancingRound = false
     @State private var placeLockTask: Task<Void, Never>?
     /// 재생 중인 한 수. 시작 시각을 함께 들어 화면이 흐른 시간만으로 어느 프레임 사이인지 셈한다.
     struct Replay: Sendable {
@@ -94,18 +95,17 @@ struct AlkkagiScreen: View {
         let to = AlkkagiGeometry.clampPull(from: pull.from, to: pull.to)
         return (pull.from, to, to != pull.to)
     }
-    /// 당기는 동안에만 시뮬레이션을 돌려 앞 40프레임의 길을 미리 보인다. 잡은 돌이 없으면 한 번도 돌지 않는다.
+    /// 당기는 동안에만 출발 방향·세기를 짧게 보인다. 충돌 뒤 경로나 정지점은 드러내지 않는다.
     private var previewPath: [Alkkagi.Point] {
-        guard let pull, let grabbed, let seat = Alkkagi.currentSeat(match.state),
+        guard let pull, let grabbed,
               let flick = AlkkagiGeometry.flick(stone: grabbed, from: pull.from, to: pull.to) else { return [] }
-        let sim = Alkkagi.simulate(match.state, flick)
-        return sim.frames.prefix(40).compactMap { $0.stones[seat][grabbed] }
+        return AlkkagiGeometry.preview(state: match.state, flick: flick)
     }
 
     var body: some View {
         ZStack {
             WoodBackground()
-            VStack(spacing: 10) {
+            VStack(spacing: 8) {
                 header
                 seats
                 GeometryReader { proxy in
@@ -114,12 +114,14 @@ struct AlkkagiScreen: View {
                     TimelineView(.animation(paused: replay == nil)) { context in
                         AlkkagiBoardView(stones: renderedStones(at: context.date), flipped: flipped, pull: drawnPull,
                                          preview: previewPath, highlight: grabbed, highlightSeat: displayedSeat ?? 0,
-                                         homeShade: placingSeat.map { Alkkagi.homeRange(seat: $0) }, dragging: draggingDraft)
+                                         homeShade: placingSeat.map { Alkkagi.homeRange(seat: $0) }, dragging: draggingDraft,
+                                         map: match.state.map)
                             .contentShape(Rectangle())
                             .gesture(dragGesture(size: proxy.size))
                     }
                 }
                 .aspectRatio(1, contentMode: .fit)
+                .padding(.horizontal, 4)
                 actionBar
                 Spacer(minLength: 0)
             }
@@ -145,8 +147,16 @@ struct AlkkagiScreen: View {
         .task { [weak match, replay = $replay, playing = $playing, isPlaying = $isPlaying, replayingSeat = $replayingSeat] in
             guard let match else { return }
             match.onRemoteMove = { [weak match] move, _ in
-                // 배치는 재생할 움직임이 없다 — 판에 돌이 놓인 것은 상태가 바뀌며 그대로 그려진다.
-                guard let match, case .flick(let flick) = move else { return }
+                guard let match else { return }
+                if case .nextRound = move {
+                    replay.wrappedValue = nil
+                    playing.wrappedValue = nil
+                    isPlaying.wrappedValue = false
+                    replayingSeat.wrappedValue = nil
+                    return
+                }
+                // 배치는 재생할 움직임이 없다.
+                guard case .flick(let flick) = move else { return }
                 // 훅은 수가 로그에 붙기 전에 불리므로 여기의 state는 수 전 배치다 — apply와 같은 재생이 나오고 좌석도 튕긴 쪽이다.
                 let seat = Alkkagi.currentSeat(match.state) ?? 0
                 let sim = Alkkagi.simulate(match.state, flick)
@@ -154,7 +164,12 @@ struct AlkkagiScreen: View {
                                   isPlaying: isPlaying, replayingSeat: replayingSeat)
             }
         }
-        .onDisappear { match.onRemoteMove = nil }
+        .onDisappear {
+            match.onRemoteMove = nil
+            replay = nil
+            placeLockTask?.cancel()
+            disconnectTask?.cancel()
+        }
         .onChange(of: match.log.moves.count, initial: true) { _, _ in
             // 재생 중에 뜨면 배너가 날아가는 돌을 덮는다. 내 튕김은 재생이 끝난 뒤 Task가 다시 부르고,
             // 상대 수는 훅의 재생이 끝난 다음에 로그가 붙어 여기서 그대로 불린다.
@@ -204,13 +219,12 @@ struct AlkkagiScreen: View {
         .padding(.horizontal, 16).padding(.top, 8)
     }
 
-    /// 배치 중에는 남은 돌을 세어 봐야 소용이 없다 — 무엇을 하는 단계인지만 적는다.
     private var statusText: String {
-        guard match.state.phase == .play else { return "배치 중" }
-        return "내 돌 \(displayedRemaining(seat: mySeat)) · 상대 돌 \(displayedRemaining(seat: 1 - mySeat))"
+        "\(match.state.roundNumber)R · \(match.state.map.title)"
     }
 
     private var turnText: String {
+        if match.state.phase == .roundOver, !isPlaying { return match.outcome == nil ? "라운드 끝" : "경기 끝" }
         guard let seat = displayedSeat else { return "끝" }
         return match.state.phase == .setup ? "\(seatNames[seat]) 배치" : "\(seatNames[seat]) 차례"
     }
@@ -226,13 +240,16 @@ struct AlkkagiScreen: View {
                             .accessibilityIdentifier("players.presence.\(seat)")
                     }
                     Text(seatNames[seat]).font(.caption).lineLimit(1)
-                    Text("\(displayedRemaining(seat: seat))").font(.caption.weight(.semibold)).monospacedDigit()
+                    Text("\(match.state.roundWins[seat])승").font(.caption.weight(.semibold)).monospacedDigit()
+                        .accessibilityIdentifier("alkkagi.score.\(seat)")
+                    Text("· 돌 \(displayedRemaining(seat: seat))").font(.caption2).monospacedDigit()
                 }
                 .foregroundStyle(current ? theme.brassInk : theme.ink)
                 .frame(maxWidth: .infinity, minHeight: 28)
                 .background(RoundedRectangle(cornerRadius: 8).fill(current ? theme.brass : theme.paper))
+                .accessibilityElement(children: .ignore)
                 .accessibilityIdentifier("players.seat.\(seat)")
-                .accessibilityLabel("\(seatNames[seat]), 돌 \(displayedRemaining(seat: seat))개\(current ? ", 현재 차례" : "")")
+                .accessibilityLabel("\(seatNames[seat]), \(match.state.roundWins[seat])승, 돌 \(displayedRemaining(seat: seat))개\(current ? ", 현재 차례" : "")")
             }
         }
         .padding(.horizontal, 16)
@@ -242,15 +259,31 @@ struct AlkkagiScreen: View {
         // 결과 카드는 재생이 끝난 뒤에 올린다 — 마지막 돌이 아직 굴러가는데 승패부터 뜨면 김이 샌다.
         if let outcome = match.outcome, playing == nil {
             VStack(spacing: 10) {
-                Text(resultText(outcome)).font(.system(.title2, design: .serif, weight: .semibold)).foregroundStyle(theme.ink)
+                Text("\(resultText(outcome)) · \(match.state.roundWins[0]):\(match.state.roundWins[1])")
+                    .font(.system(.title2, design: .serif, weight: .semibold)).foregroundStyle(theme.ink)
                     .accessibilityIdentifier("alkkagi.result")
                 Button(action: onReturn) { Label("메뉴로", systemImage: "chevron.left").frame(maxWidth: .infinity).brassButton(prominent: true) }
                     .buttonStyle(.plain).accessibilityIdentifier("alkkagi.back")
             }
             .paperCard(padding: 14).padding(.horizontal, 16)
+        } else if let result = match.state.roundOutcome, playing == nil {
+            VStack(spacing: 8) {
+                Text(result == .draw ? "무승부 · 같은 맵에서 다시 시작" : "\(match.state.roundNumber)라운드 \(resultText(result))")
+                    .font(.headline).foregroundStyle(theme.ink).accessibilityIdentifier("alkkagi.roundResult")
+                Text("3판 2선승 · 먼저 2승을 얻으면 승리")
+                    .font(.caption).foregroundStyle(theme.inkSecondary)
+                Button(action: advanceRound) {
+                    Text(match.isLocalTurn ? (result == .draw ? "라운드 다시 시작" : "다음 라운드") : "상대가 다음 라운드를 준비하는 중")
+                        .frame(maxWidth: .infinity).brassButton(prominent: true)
+                }
+                .buttonStyle(.plain).disabled(!match.isLocalTurn || advancingRound)
+                .accessibilityIdentifier("alkkagi.nextRound")
+            }
+            .paperCard(padding: 12).padding(.horizontal, 12)
         } else if let placingSeat {
             VStack(spacing: 8) {
-                Text(isMyPlacement ? "내 돌을 진영 안에 놓는다" : "\(seatNames[placingSeat])이(가) 돌을 놓는 중")
+                Text(match.state.map.guide).font(.caption2).foregroundStyle(theme.brass)
+                Text(isMyPlacement ? "내 돌을 진영 안에 놓으세요 · 먼저 2승하면 승리" : "\(seatNames[placingSeat])이(가) 돌을 놓는 중")
                     .font(.caption).foregroundStyle(theme.ivory)
                 Button(action: placeDraft) { Text("배치 완료").frame(maxWidth: .infinity).brassButton(prominent: true) }
                     .buttonStyle(.plain).disabled(!canPlace).accessibilityIdentifier("alkkagi.placeDone")
@@ -263,7 +296,20 @@ struct AlkkagiScreen: View {
     }
 
     /// 내 차례이고 잠기지 않았고 초안이 규칙에 맞을 때만 확정할 수 있다.
-    private var canPlace: Bool { isMyPlacement && !placeLocked && Alkkagi.placementIsValid(myDraft, seat: mySeat) }
+    private var canPlace: Bool {
+        isMyPlacement && !placeLocked && Alkkagi.placementIsValid(myDraft, seat: mySeat, map: match.state.map)
+    }
+
+    private func advanceRound() {
+        guard match.isLocalTurn, !isPlaying, !advancingRound else { return }
+        advancingRound = true
+        grabbed = nil; finger = nil; draft = nil
+        turnBanner = nil; toast = nil
+        Task {
+            if await match.play(.nextRound) == false { showToast("다음 라운드를 시작할 수 없어요") }
+            advancingRound = false
+        }
+    }
 
     private func placeDraft() {
         let points = myDraft
@@ -332,7 +378,7 @@ struct AlkkagiScreen: View {
         let to = AlkkagiGeometry.snap(finger ?? AlkkagiGeometry.point(at: value.location, in: size, flipped: flipped))
         var next = myDraft
         next[grabbed] = to
-        guard Alkkagi.placementIsValid(next, seat: mySeat) else { return }
+        guard Alkkagi.placementIsValid(next, seat: mySeat, map: match.state.map) else { return }
         draft = (mySeat, next)
     }
 
@@ -364,11 +410,13 @@ struct AlkkagiScreen: View {
             do {
                 if due > 0 { try await Task.sleep(for: .seconds(due)) } else { try Task.checkCancellation() }
             } catch { break }
+            // 다음 라운드나 새 재생이 시작됐으면 이전 Task가 돌·소리를 되살리지 않는다.
+            guard replay.wrappedValue?.start == start else { return }
             // 머리글과 명패의 돌 수는 프레임마다 갱신해 떨어지는 순간에 줄어든다. 판은 시계가 그리므로 영향이 없다.
             playing.wrappedValue = sim.frames[i].stones
             for event in eventsToPlay(in: sim, frame: i, from: &eventIndex) {
                 switch event.kind {
-                case .collision: SoundPlayer.shared.play(SoundSynth.clack(), key: "clack"); Haptics.shared.play(.impactMedium)
+                case .collision, .bumper: SoundPlayer.shared.play(SoundSynth.clack(), key: "clack"); Haptics.shared.play(.impactMedium)
                 case .dropped: SoundPlayer.shared.play(SoundSynth.drop(), key: "drop"); Haptics.shared.play(.impactHeavy)
                 }
             }
@@ -419,7 +467,8 @@ struct AlkkagiScreen: View {
 
     /// 지금 차례를 배너로 알린다. 판이 끝났으면 알릴 차례가 없다.
     private func announceTurn() {
-        guard match.outcome == nil, let seat = Alkkagi.currentSeat(match.state) else { return }
+        guard match.outcome == nil, match.state.phase != .roundOver,
+              let seat = Alkkagi.currentSeat(match.state) else { return }
         // 배치는 누가 놓을 차례인지가 전부라 온라인에서도 이름을 부른다.
         guard match.state.phase == .play else { return showBanner("\(seatNames[seat]) 배치") }
         // 로컬 2인은 두 좌석 다 내 것이라 "내 차례"가 아무것도 알려주지 않는다. 이름을 부른다.
