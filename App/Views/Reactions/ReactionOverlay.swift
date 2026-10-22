@@ -29,6 +29,8 @@ struct ReactionOverlay: View {
 private struct ReactionBurstView: View {
     let emoji: String
     let reduceMotion: Bool
+    /// 나타날 때 한 번 바뀌어 키프레임을 한 번만 돌린다. 방아쇠가 없는 키프레임은 끝나면 처음부터 되풀이한다.
+    @State private var started = false
 
     private struct Frame {
         var rise: CGFloat = 0
@@ -44,7 +46,7 @@ private struct ReactionBurstView: View {
             Text(emoji).font(.system(size: 64))
         }
         .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
-        .keyframeAnimator(initialValue: Frame()) { content, frame in
+        .keyframeAnimator(initialValue: Frame(), trigger: started) { content, frame in
             content
                 .environment(\.reactionSpread, reduceMotion ? 0 : frame.spread)
                 .offset(y: reduceMotion ? 0 : -frame.rise)
@@ -63,6 +65,7 @@ private struct ReactionBurstView: View {
                 LinearKeyframe(0, duration: 0.8)
             }
         }
+        .onAppear { started = true }
         .accessibilityIdentifier("reaction.burst")
         .accessibilityLabel(emoji)
     }
