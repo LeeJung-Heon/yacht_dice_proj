@@ -52,6 +52,9 @@ final class CupPongUITests: XCTestCase {
         let start = table.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95))
         let end = table.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
         start.press(forDuration: 0.05, thenDragTo: end)
+        // 수는 놓는 순간 들어가지만 공이 나는 동안 머리글은 던지기 직전 그대로다
+        XCTAssertEqual(turn.label, "나 차례", "공이 나는 동안 차례가 넘어가 보였다")
+        XCTAssertEqual(status.label, "내 컵 10 · 상대 컵 10", "공이 닿기 전에 컵 수가 바뀌었다")
         // 물리 재생이 끝난 뒤: 맞혔으면 상대 컵이 9가 되고, 빗나갔으면 차례가 "상대 차례"로 넘어간다
         let moved = NSPredicate { _, _ in
             status.label != "내 컵 10 · 상대 컵 10" || turn.label == "상대 차례"
