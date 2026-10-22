@@ -427,10 +427,20 @@ struct SupabaseE2ETests {
             try await ta.publish(TurnPayload(log: final.log, eventCount: 9, hints: [], turnSeat: 1, winnerSeat: nil, finished: false))
             let untouched = try await host.fetchMatch(id: room.id)
             #expect(untouched.status == "finished" && untouched.winnerSeat == 0 && untouched.eventCount == 9, "끝난 판이 바뀌었다")
-            let records = await host.fetchRecords(player: try #require(RecordsStore.playerKey(playerID: nil, uid: hostUid)))
+            let records = await host.fetchRecords(players: RecordsStore.playerKeys(playerID: nil, uid: hostUid))
             #expect(records?.first { $0.game == "omok" }?.wins == 1)
-            let theirs = await guest.fetchRecords(player: try #require(RecordsStore.playerKey(playerID: nil, uid: guestUid)))
+            let theirs = await guest.fetchRecords(players: RecordsStore.playerKeys(playerID: nil, uid: guestUid))
             #expect(theirs?.first { $0.game == "omok" }?.losses == 1)
+            // 익명으로 둔 판 뒤에 Game Center 신원을 이어도 그 판은 전적에 남는다. 좌석에는 uid만 적혀 있어
+            // gamePlayerID 하나로만 읽으면 빠지므로, 로그인한 사람은 두 키를 함께 읽어 더한다.
+            let player = "E2E-\(UUID().uuidString)"
+            await host.upsertProfile(player: player, name: "A")
+            #expect(host.linkedPlayer == player)
+            let onlyPlayer = await host.fetchRecords(players: [player])
+            #expect(onlyPlayer?.first { $0.game == "omok" } == nil, "좌석에 uid만 적힌 판이 gamePlayerID로 세어졌다")
+            let merged = RecordsStore.merge(await host.fetchRecords(players: RecordsStore.playerKeys(playerID: player, uid: hostUid)) ?? [],
+                                            as: player)
+            #expect(merged.first { $0.game == "omok" }?.wins == 1, "로그인한 뒤 익명으로 둔 판의 승리가 전적에서 빠졌다")
             try await host.deleteMatch(id: room.id)
         } catch {
             try? await host.deleteMatch(id: room.id)
