@@ -79,6 +79,7 @@ struct CupPongScreen: View {
                                      customization: match.mode.isOnline && 1 - shooter != mySeat ? opponentDesign : .shared)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .gesture(dragGesture(height: screen.size.height))
+                        .overlay { if let reactions = match.reactions { ReactionOverlay(board: reactions) } }
                         .clipShape(RoundedRectangle(cornerRadius: 22))
                         .padding(.horizontal, 8)
                     if let photoSyncMessage {
@@ -199,7 +200,11 @@ struct CupPongScreen: View {
             }
             Spacer()
             Text(displayedTurn.map { "\(seatNames[$0]) 차례" } ?? "끝")
-                .font(.caption).foregroundStyle(theme.ivory).accessibilityIdentifier("header.turn")
+                .font(.caption).foregroundStyle(theme.ivory).lineLimit(1).minimumScaleFactor(0.8)
+                .accessibilityIdentifier("header.turn")
+            if let reactions = match.reactions {
+                ReactionButton(canSend: reactions.canSend) { match.sendReaction($0) }
+            }
         }
         .padding(.horizontal, 16).padding(.top, 8)
     }
@@ -222,6 +227,7 @@ struct CupPongScreen: View {
                 .background(RoundedRectangle(cornerRadius: 8).fill(current ? theme.brass : theme.paper))
                 .accessibilityIdentifier("players.seat.\(seat)")
                 .accessibilityLabel("\(seatNames[seat]), 컵 \(remaining(seat))개\(current ? ", 현재 차례" : "")")
+                .reactionBadge(match.reactions?.badges[seat]?.emoji, seat: seat)
             }
         }
         .padding(.horizontal, 16)

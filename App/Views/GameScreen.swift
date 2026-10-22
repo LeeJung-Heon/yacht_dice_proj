@@ -41,6 +41,7 @@ struct GameScreen: View {
                     .frame(height: geometry.size.height * (session.participants.count > 1 ? 0.37 : 0.41))
                     .contentShape(Rectangle())
                     .gesture(throwGesture)
+                    .overlay { if let reactions = session.reactions { ReactionOverlay(board: reactions) } }
                     .overlay(alignment: .top) { edgeShadow(.top) }
                     .overlay(alignment: .bottom) { edgeShadow(.bottom) }
                     Group {
@@ -200,7 +201,11 @@ struct GameScreen: View {
                     .accessibilityIdentifier("header.status")
             } else if case .remote = session.currentParticipant {
                 Text("상대 차례").font(.subheadline).foregroundStyle(theme.ivory.opacity(0.8))
+                    .lineLimit(1).minimumScaleFactor(0.8)
                     .accessibilityIdentifier("header.status")
+            }
+            if let reactions = session.reactions {
+                ReactionButton(canSend: reactions.canSend) { session.sendReaction($0) }
             }
         }
         .padding(.horizontal, 12)

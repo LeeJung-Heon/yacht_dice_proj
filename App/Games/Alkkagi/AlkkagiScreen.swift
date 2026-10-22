@@ -166,6 +166,7 @@ struct AlkkagiScreen: View {
                     }
                 }
                 .aspectRatio(1, contentMode: .fit)
+                .overlay { if let reactions = match.reactions { ReactionOverlay(board: reactions) } }
                 .padding(.horizontal, 4)
                 actionBar
                 Spacer(minLength: 0)
@@ -290,7 +291,10 @@ struct AlkkagiScreen: View {
             Text(statusText)
                 .font(.caption).monospacedDigit().foregroundStyle(theme.brass).accessibilityIdentifier("header.status")
             Text(turnText)
-                .font(.caption).foregroundStyle(theme.ivory).accessibilityIdentifier("header.turn")
+                .font(.caption).foregroundStyle(theme.ivory).minimumScaleFactor(0.8).accessibilityIdentifier("header.turn")
+            if let reactions = match.reactions {
+                ReactionButton(canSend: reactions.canSend) { match.sendReaction($0) }
+            }
         }
         .lineLimit(1)
         .padding(.horizontal, 16).padding(.top, 8)
@@ -327,6 +331,7 @@ struct AlkkagiScreen: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityIdentifier("players.seat.\(seat)")
                 .accessibilityLabel("\(seatNames[seat]), \(match.state.roundWins[seat])승, 돌 \(displayedRemaining(seat: seat))개\(current ? ", 현재 차례" : "")")
+                .reactionBadge(match.reactions?.badges[seat]?.emoji, seat: seat)
             }
         }
         .padding(.horizontal, 16)
