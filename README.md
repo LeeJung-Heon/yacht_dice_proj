@@ -132,7 +132,7 @@ Game Center로 로그인하면 `gamePlayerID`와 그 순간의 익명 uid를 sec
 
 앱이 닫혀 있어도 차례가 오면 알림이 오는데, 온라인 메뉴에 들어올 때 알림 권한을 묻고 APNs 토큰을 `device_tokens`에 올리며, 내 턴이 끝나 `turn_seat`가 바뀌거나 게스트가 들어오면 트리거 `matches_turn_webhook`가 `pg_net`으로 Edge Function `notify-turn`을 부르고, 함수는 알릴 좌석의 토큰을 읽어 APNs(HTTP/2, ES256 JWT)로 "내 차례"를 보내며 죽은 토큰은 지우고, 알림을 탭하면 그 판이 열린다. 함수 시크릿은 `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`(.p8 본문), `APNS_BUNDLE_ID`, `WEBHOOK_SECRET`이며 `supabase secrets set --project-ref lkernselwouldtuialjh`로 넣고, `WEBHOOK_SECRET`은 Vault의 `webhook_secret`과 같은 값이어야 하며, 서버 SQL은 `supabase/migrations/`에, 함수는 `supabase/functions/notify-turn/`에 있고 JWT 생성은 `deno test supabase/functions/notify-turn/`으로 검증한다.
 
-검증은 세 층으로 되어 있는데, 메모리 전송으로 두 세션이 12턴을 완주하고 힌트로 같은 자세에 멈추는 단위 테스트, `YACHT_SUPABASE_E2E=1`을 주면 실제 프로젝트에 익명 계정 둘로 방 만들기·입장·턴 왕복과 전달 지연(중앙값 1.5초 아래), 낯선 계정의 구독 거부, Presence, 자세 재현, 폴링만으로의 전달과, 오목 방을 만들어 다섯 수로 끝내고 `winner_seat`·`records`·끝난 매치의 불변까지 확인하는 통합 테스트(`SupabaseE2ETests`), 그리고 시뮬레이터 두 대가 화면에서 코드로 만나 턴을 주고받는 것까지 확인했다.
+검증은 세 층으로 되어 있는데, 메모리 전송으로 두 세션이 12턴을 완주하고 힌트로 같은 자세에 멈추는 단위 테스트, `YACHT_SUPABASE_E2E=1`을 주면 실제 프로젝트에 익명 계정 둘로 방 만들기·입장·턴 왕복과 전달 지연(중앙값 1.5초 아래, 2026-10-22 측정은 0.084초)과 빠른 길 도착, 낯선 계정의 구독 거부와 브로드캐스트 차단, Presence와 순간 상태 전달, 옛 갱신이 새 로그를 덮지 못하는 것, 자세 재현, 폴링만으로의 전달과, 오목 방을 만들어 다섯 수로 끝내고 `winner_seat`·`records`·끝난 매치의 불변까지 확인하는 통합 테스트(`SupabaseE2ETests`), 그리고 시뮬레이터 두 대가 화면에서 코드로 만나 턴을 주고받는 것까지 확인했다.
 
 ```sh
 TEST_RUNNER_YACHT_SUPABASE_E2E=1 xcodebuild -project YachtDice.xcodeproj -scheme YachtDice \

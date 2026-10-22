@@ -415,10 +415,13 @@ struct SupabaseE2ETests {
             let final = try await host.fetchMatch(id: room.id)
             #expect(final.status == "finished" && final.winnerSeat == 0)
             #expect(try MoveLog<Omok>.decoded(from: final.log) == a.log)
-            // 끝난 판은 더 못 바꾼다
+            // 끝난 판은 더 못 바꾼다 — 수를 더한 갱신은 서버가 거절하고, 같은 수의 덮어쓰기는 조건부 갱신이라 아무 행도 바꾸지 않는다
             await #expect(throws: (any Error).self) {
-                try await ta.publish(TurnPayload(log: final.log, eventCount: 9, hints: [], turnSeat: 1, winnerSeat: nil, finished: false))
+                try await ta.publish(TurnPayload(log: final.log, eventCount: 10, hints: [], turnSeat: 1, winnerSeat: nil, finished: false))
             }
+            try await ta.publish(TurnPayload(log: final.log, eventCount: 9, hints: [], turnSeat: 1, winnerSeat: nil, finished: false))
+            let untouched = try await host.fetchMatch(id: room.id)
+            #expect(untouched.status == "finished" && untouched.winnerSeat == 0 && untouched.eventCount == 9, "끝난 판이 바뀌었다")
             let records = await host.fetchRecords(player: try #require(RecordsStore.playerKey(playerID: nil, uid: hostUid)))
             #expect(records?.first { $0.game == "omok" }?.wins == 1)
             let theirs = await guest.fetchRecords(player: try #require(RecordsStore.playerKey(playerID: nil, uid: guestUid)))
