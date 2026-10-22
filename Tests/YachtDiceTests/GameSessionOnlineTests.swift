@@ -48,6 +48,85 @@ struct GameSessionOnlineTests {
         return (a, b, ta, tb)
     }
 
+    /// 원격 상대 하나와 붙은 A 세션 하나. 받을 일은 없고 보내는 것만 본다.
+    private func makeSender(_ transport: any TurnTransport) throws -> GameSession {
+        let seats: [Participant] = [.human(name: "A"), .remote(playerID: "b", name: "B")]
+        return GameSession(driver: ConstantDriver(face: 3), stage: DiceStage(library: try TrajectoryLibrary.bundled()),
+                           record: MatchRecord(mode: .online(matchID: "m"), participants: seats, log: MatchLog(playerCount: 2)),
+                           transport: transport)
+    }
+
+    /// 조건이 참이 될 때까지 기다린다.
+    private func waitUntil(_ timeout: Duration = .seconds(3), _ condition: () -> Bool) async {
+        let deadline = ContinuousClock.now + timeout
+        while !condition(), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(5)) }
+    }
+
+    @Test("굴림은 착지 전에 한 번만 올라가고 내 화면은 전송을 기다리지 않는다")
+    func 굴림_선전송() async throws {
+        let transport = GatedTransport()
+        let a = try makeSender(transport)
+        a.reduceMotion = false
+        let rolling = Task { await a.send(.roll) }
+        await waitUntil { !transport.sent.isEmpty }
+        let payload = try #require(transport.sent.first)
+        #expect(a.visibleState.rollsRemaining == 3, "착지한 뒤에야 굴림을 올렸다")
+        #expect(payload.eventCount == 1)
+        #expect(try MatchLog.decoded(from: payload.log).events == [.rolled([3, 3, 3, 3, 3])])
+        #expect(payload.hints.count == 1 && payload.hints.first?.event == 0)
+        // 게이트가 닫혀 있어도 착지하면 내 화면에는 굴림이 드러난다
+        await waitUntil { a.visibleState.rollsRemaining == 2 }
+        #expect(a.visibleState.rollsRemaining == 2, "전송을 기다리느라 굴림이 드러나지 않았다")
+        transport.open()
+        await rolling.value
+        #expect(transport.sent.count == 1, "굴림 하나에 payload가 \(transport.sent.count)번 나갔다")
+    }
+
+    @Test("굴림 전송이 실패해도 굴림은 내 화면에 드러나고 오류가 남는다")
+    func 굴림_전송_실패() async throws {
+        let a = try makeSender(FailingTransport())
+        a.reduceMotion = true
+        await a.send(.roll)
+        #expect(a.visibleState.rollsRemaining == 2)
+        #expect(a.lastTransportError == "서버에 보내지 못해 다시 시도하는 중이다")
+    }
+
+    @Test("따로 도착한 고정 둘은 뜸 없이 이어 재생한다")
+    func 고정_뜸() async throws {
+        let (a, b, _, _) = try makePair()
+        b.reduceMotion = false
+        await a.send(.roll)
+        await b.waitForIncoming()
+        await a.send(.toggleHold(0))
+        await a.send(.toggleHold(1))
+        let clock = ContinuousClock()
+        await waitUntil { b.visibleState.held.contains(0) }
+        let first = clock.now
+        await waitUntil { b.visibleState.held.contains(1) }
+        let gap = clock.now - first
+        #expect(b.visibleState.held == [0, 1])
+        #expect(gap < .milliseconds(300), "두 번째 고정이 \(gap) 뒤에야 보였다")
+    }
+
+    @Test("요트 온라인 세션은 반응을 주고받고 상대 기록으로 차례가 바뀌면 배지가 사라진다")
+    func 반응() async throws {
+        let (a, b, _, _) = try makePair()
+        #expect(a.sendReaction("🔥"))
+        await waitUntil { b.reactions?.badges[0] != nil }
+        #expect(b.reactions?.badges[0]?.emoji == "🔥")
+        await a.send(.roll)
+        await a.send(.commit(.threes))
+        await b.waitForIncoming()
+        #expect(b.reactions?.badges[0] == nil && a.reactions?.badges[0] == nil)
+    }
+
+    @Test("요트 로컬 세션은 반응이 없다")
+    func 로컬_반응() throws {
+        let session = GameSession(driver: ConstantDriver(face: 3), stage: DiceStage(library: try TrajectoryLibrary.bundled()),
+                                  record: MatchRecord(mode: .solo, participants: GameMode.solo.participants, log: MatchLog(playerCount: 1)))
+        #expect(session.reactions == nil && !session.sendReaction("🔥"))
+    }
+
     @Test("A의 턴이 끝나면 B에 같은 상태가 재생되고 B의 차례가 열린다")
     func 한_턴_전파() async throws {
         let (a, b, _, _) = try makePair()
@@ -182,4 +261,41 @@ struct GameSessionOnlineTests {
         #expect(b.visibleState.scorecards[0].entry(.yacht) == nil)
         #expect(b.lastTransportError != nil)
     }
+}
+
+/// publish가 payload를 기록한 뒤 테스트가 `open()`할 때까지 멈춘다. 느린 망을 흉내 낸다.
+private final class GatedTransport: TurnTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _sent: [TurnPayload] = []
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var isOpen = false
+    var sent: [TurnPayload] { lock.withLock { _sent } }
+    let incoming = AsyncStream<RemoteUpdate> { _ in }
+
+    func publish(_ payload: TurnPayload) async throws {
+        lock.withLock { _sent.append(payload) }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let open = lock.withLock { () -> Bool in
+                if isOpen { return true }
+                waiters.append(continuation)
+                return false
+            }
+            if open { continuation.resume() }
+        }
+    }
+
+    func open() {
+        let pending = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            isOpen = true
+            defer { waiters = [] }
+            return waiters
+        }
+        pending.forEach { $0.resume() }
+    }
+}
+
+/// 늘 망이 끊긴 것처럼 실패한다.
+private struct FailingTransport: TurnTransport {
+    func publish(_ payload: TurnPayload) async throws { throw URLError(.notConnectedToInternet) }
+    var incoming: AsyncStream<RemoteUpdate> { AsyncStream { _ in } }
 }

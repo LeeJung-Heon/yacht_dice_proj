@@ -46,6 +46,31 @@ struct RecordsStoreTests {
         #expect(RecordsStore.playerKey(playerID: nil, uid: nil) == nil)
     }
 
+    @Test("로그인했으면 Game Center id와 지금 uid를 함께 읽고, 아니면 uid만 읽는다")
+    func 읽을_키() {
+        let uid = UUID()
+        #expect(RecordsStore.playerKeys(playerID: "G:9", uid: uid) == ["G:9", uid.uuidString.lowercased()])
+        #expect(RecordsStore.playerKeys(playerID: nil, uid: uid) == [uid.uuidString.lowercased()])
+        #expect(RecordsStore.playerKeys(playerID: "G:9", uid: nil) == ["G:9"])
+        #expect(RecordsStore.playerKeys(playerID: nil, uid: nil).isEmpty)
+    }
+
+    @Test("두 식별자로 쪼개진 줄을 게임별로 더하고 게임 순서로 늘어놓는다")
+    func 합치기() {
+        let rows = [
+            RecordRow(player: "uid", game: "omok", wins: 3, losses: 1, draws: 1),
+            RecordRow(player: "G:9", game: "omok", wins: 1, losses: 2, draws: 0),
+            RecordRow(player: "uid", game: "yacht", wins: 2, losses: 0, draws: 0),
+            RecordRow(player: "G:9", game: "alkkagi", wins: 0, losses: 1, draws: 0),
+        ]
+        let merged = RecordsStore.merge(rows, as: "G:9")
+        #expect(merged == [
+            RecordRow(player: "G:9", game: "yacht", wins: 2, losses: 0, draws: 0),
+            RecordRow(player: "G:9", game: "omok", wins: 4, losses: 3, draws: 1),
+            RecordRow(player: "G:9", game: "alkkagi", wins: 0, losses: 1, draws: 0),
+        ])
+    }
+
     @Test("같은 승수는 리더보드에 다시 올리지 않는다")
     @MainActor
     func 중복_제출() {

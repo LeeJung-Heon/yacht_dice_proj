@@ -229,8 +229,48 @@ struct SupabaseE2ETests {
         }
         let sorted = samples.sorted()
         let median = sorted[sorted.count / 2]
-        print("지연 표본 \(samples), 중앙값 \(median)")
+        print("지연 표본 \(samples), 중앙값 \(median), 빠른 길 \(pair.tb.fastPathDeliveries)회")
         #expect(median < .milliseconds(1500), "지연 표본: \(samples)")
+        #expect(pair.tb.fastPathDeliveries > 0, "빠른 길로 도착한 수가 없다: \(pair.ta.lastBroadcastError ?? "보내기 오류 없음")")
+    }
+
+    /// 스트림의 첫 값을 기다린다. 제한 시간이 지나면 nil.
+    private func firstLive(_ transport: SupabaseTurnTransport, within timeout: Duration) async -> LiveFrame? {
+        let received = Task { () -> LiveFrame? in
+            for await frame in transport.live { return frame }
+            return nil
+        }
+        let timer = Task { try? await Task.sleep(for: timeout); received.cancel() }
+        defer { timer.cancel() }
+        return await received.value
+    }
+
+    /// 접속 테스트의 쌍을 그대로 써 익명 가입 한도를 아낀다.
+    private func expectLiveArrives(_ pair: (host: SupabaseService, room: MatchRow, a: GameSession, b: GameSession,
+                                            ta: SupabaseTurnTransport, tb: SupabaseTurnTransport)) async throws {
+        async let got = firstLive(pair.tb, within: .seconds(5))
+        try await Task.sleep(for: .milliseconds(200))
+        await pair.ta.sendLive(LiveFrame(eventCount: 0, state: Data("{\"x\":1,\"y\":2}".utf8)))
+        let frame = try #require(await got, "순간 상태가 오지 않았다: \(pair.ta.lastBroadcastError ?? "보내기 오류 없음")")
+        #expect(frame.eventCount == 0)
+        #expect(try JSONDecoder().decode([String: Int].self, from: try #require(frame.state)) == ["x": 1, "y": 2])
+    }
+
+    @Test("옛 갱신은 새 로그를 덮지 못하고 줄이는 갱신은 거절된다")
+    func 순서_보호() async throws {
+        let pair = try await makePair()
+        let id = pair.room.id.uuidString
+        try await pair.host.client.from("matches").update(["event_count": 5]).eq("id", value: id).execute()
+        let stale = TurnPayload(log: try MatchLog(playerCount: 2).encoded(), eventCount: 2, hints: [],
+                                turnSeat: 0, winnerSeat: nil, finished: false)
+        try await pair.ta.publish(stale)
+        #expect(try await pair.host.fetchMatch(id: pair.room.id).eventCount == 5, "옛 갱신이 새 로그를 덮었다")
+        do {
+            try await pair.host.client.from("matches").update(["event_count": 1]).eq("id", value: id).execute()
+            Issue.record("event_count를 줄이는 갱신이 통과했다")
+        } catch let error as PostgrestError {
+            #expect(error.message == "event count must not decrease", "다른 오류로 거부됐다: \(error)")
+        }
     }
 
     @Test("게스트가 재생한 주사위 자세가 호스트와 같다")
@@ -247,7 +287,7 @@ struct SupabaseE2ETests {
         }
     }
 
-    @Test("게스트가 채널에 들어오면 호스트의 opponentPresent가 참이 된다")
+    @Test("게스트가 채널에 들어오면 호스트의 opponentPresent가 참이 되고 순간 상태와 이모지 반응이 상대에게 닿는다")
     func 접속() async throws {
         let pair = try await makePair()
         let deadline = ContinuousClock.now + .seconds(8)
@@ -256,6 +296,12 @@ struct SupabaseE2ETests {
         }
         #expect(pair.a.opponentPresent && pair.b.opponentPresent)
         #expect(pair.a.isConnected && pair.b.isConnected)
+        try await expectLiveArrives(pair)
+        // 게스트 세션이 반응 스트림을 이미 읽고 있으므로 배지로 확인한다
+        #expect(pair.a.sendReaction("🔥"))
+        let arrival = ContinuousClock.now + .seconds(5)
+        while pair.b.reactions?.badges[0] == nil, ContinuousClock.now < arrival { try await Task.sleep(for: .milliseconds(50)) }
+        #expect(pair.b.reactions?.badges[0]?.emoji == "🔥", "이모지 반응이 오지 않았다: \(pair.ta.lastBroadcastError ?? "보내기 오류 없음")")
     }
 
     @Test("참가자가 아닌 계정은 비공개 채널을 구독할 수 없다")
@@ -270,6 +316,15 @@ struct SupabaseE2ETests {
             try await Task.sleep(for: .milliseconds(100))
         }
         #expect(!transport.isSubscribed && transport.subscribeError != nil, "낯선 계정이 구독됐다")
+
+        // 구독이 거절된 계정이 REST로 그 토픽에 보낸 순간 상태는 참가자에게 닿지 않는다
+        let session = try await stranger.client.auth.session
+        await stranger.client.realtimeV2.setAuth(session.accessToken)
+        let channel = stranger.client.channel("match:\(pair.room.id.uuidString.lowercased())") { $0.isPrivate = true }
+        async let leaked = firstLive(pair.tb, within: .seconds(4))
+        try await Task.sleep(for: .milliseconds(200))
+        try? await channel.httpSend(event: "live", message: ["event_count": 0, "state": ["x": 9]] as JSONObject)
+        #expect(await leaked == nil, "낯선 계정의 브로드캐스트가 참가자에게 닿았다")
     }
 
     @Test("Realtime 없이 폴링만으로도 상대의 턴이 도착한다")
@@ -365,14 +420,27 @@ struct SupabaseE2ETests {
             let final = try await host.fetchMatch(id: room.id)
             #expect(final.status == "finished" && final.winnerSeat == 0)
             #expect(try MoveLog<Omok>.decoded(from: final.log) == a.log)
-            // 끝난 판은 더 못 바꾼다
+            // 끝난 판은 더 못 바꾼다 — 수를 더한 갱신은 서버가 거절하고, 같은 수의 덮어쓰기는 조건부 갱신이라 아무 행도 바꾸지 않는다
             await #expect(throws: (any Error).self) {
-                try await ta.publish(TurnPayload(log: final.log, eventCount: 9, hints: [], turnSeat: 1, winnerSeat: nil, finished: false))
+                try await ta.publish(TurnPayload(log: final.log, eventCount: 10, hints: [], turnSeat: 1, winnerSeat: nil, finished: false))
             }
-            let records = await host.fetchRecords(player: try #require(RecordsStore.playerKey(playerID: nil, uid: hostUid)))
+            try await ta.publish(TurnPayload(log: final.log, eventCount: 9, hints: [], turnSeat: 1, winnerSeat: nil, finished: false))
+            let untouched = try await host.fetchMatch(id: room.id)
+            #expect(untouched.status == "finished" && untouched.winnerSeat == 0 && untouched.eventCount == 9, "끝난 판이 바뀌었다")
+            let records = await host.fetchRecords(players: RecordsStore.playerKeys(playerID: nil, uid: hostUid))
             #expect(records?.first { $0.game == "omok" }?.wins == 1)
-            let theirs = await guest.fetchRecords(player: try #require(RecordsStore.playerKey(playerID: nil, uid: guestUid)))
+            let theirs = await guest.fetchRecords(players: RecordsStore.playerKeys(playerID: nil, uid: guestUid))
             #expect(theirs?.first { $0.game == "omok" }?.losses == 1)
+            // 익명으로 둔 판 뒤에 Game Center 신원을 이어도 그 판은 전적에 남는다. 좌석에는 uid만 적혀 있어
+            // gamePlayerID 하나로만 읽으면 빠지므로, 로그인한 사람은 두 키를 함께 읽어 더한다.
+            let player = "E2E-\(UUID().uuidString)"
+            await host.upsertProfile(player: player, name: "A")
+            #expect(host.linkedPlayer == player)
+            let onlyPlayer = await host.fetchRecords(players: [player])
+            #expect(onlyPlayer?.first { $0.game == "omok" } == nil, "좌석에 uid만 적힌 판이 gamePlayerID로 세어졌다")
+            let merged = RecordsStore.merge(await host.fetchRecords(players: RecordsStore.playerKeys(playerID: player, uid: hostUid)) ?? [],
+                                            as: player)
+            #expect(merged.first { $0.game == "omok" }?.wins == 1, "로그인한 뒤 익명으로 둔 판의 승리가 전적에서 빠졌다")
             try await host.deleteMatch(id: room.id)
         } catch {
             try? await host.deleteMatch(id: room.id)

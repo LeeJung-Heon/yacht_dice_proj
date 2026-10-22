@@ -61,13 +61,33 @@ final class DiceStage {
         let yaws: [Int]
     }
 
+    /// 한 번의 굴림을 재생하기 전에 정한 것. 재생 전에 상대에게 보내면 두 화면이 같은 던지기를 동시에 시작한다.
+    struct RollPlan {
+        let values: [Int]
+        let slots: [Int]
+        let trajectoryID: UInt16
+        let direction: ThrowDirection
+        let yaws: [Int]
+        /// nil이면 재생할 것이 없다(굴릴 슬롯이 없거나 궤적이 없다).
+        fileprivate let trajectory: Trajectory?
+        fileprivate let offsets: [simd_quatf]
+    }
+
     /// - Parameters:
     ///   - hint: 상대가 굴릴 때 고른 궤적·회전. 맞으면 그대로 써서 같은 던지기를 재생한다.
     func roll(values: [Int], slots: [Int], direction: ThrowDirection,
               skipAnimation: Bool, hint: ThrowHint? = nil,
               onCue: ((CollisionCue) -> Void)? = nil) async -> RollOutcome {
+        await play(planRoll(values: values, slots: slots, direction: direction, hint: hint),
+                   skipAnimation: skipAnimation, onCue: onCue)
+    }
+
+    /// 지금 자세에서 궤적과 회전 선택을 정한다. 주사위는 움직이지 않는다.
+    func planRoll(values: [Int], slots: [Int], direction: ThrowDirection, hint: ThrowHint? = nil) -> RollPlan {
         precondition(values.count == slots.count, "값과 슬롯의 개수가 다르다")
-        guard !slots.isEmpty else { return RollOutcome(cues: [], trajectoryID: 0, direction: direction, yaws: []) }
+        let empty = RollPlan(values: values, slots: slots, trajectoryID: 0, direction: direction, yaws: [],
+                             trajectory: nil, offsets: [])
+        guard !slots.isEmpty else { return empty }
 
         var generator = SystemRandomNumberGenerator()
         // 힌트가 맞으면 그대로 쓴다. 상대 화면과 같은 던지기를 보이기 위해서다.
@@ -81,7 +101,7 @@ final class DiceStage {
         // TrajectoryLibraryTests.변형_다양성이 번들 파일에 대해 보장한다.
         guard let trajectory = hinted ?? library.pick(dieCount: slots.count, direction: usedDirection, using: &generator) else {
             assertionFailure("\(slots.count)개 / \(direction) 궤적이 번들에 없다")
-            return RollOutcome(cues: [], trajectoryID: 0, direction: direction, yaws: [])
+            return empty
         }
 
         // 굴리는 각 주사위에 대해 회전 선택을 정한다. 힌트가 있으면 그것을, 없으면
@@ -95,8 +115,19 @@ final class DiceStage {
         let offsets = (0..<slots.count).map { lane in
             FaceControl.offset(restUpFace: trajectory.restUpFace(die: lane), showing: values[lane], yawChoice: yaws[lane])
         }
+        return RollPlan(values: values, slots: slots, trajectoryID: trajectory.id, direction: usedDirection, yaws: yaws,
+                        trajectory: trajectory, offsets: offsets)
+    }
+
+    /// 세운 계획을 재생한다.
+    /// - Returns: 재생 중 터뜨릴 충돌 큐와 고른 것. 호출자가 사운드·햅틱과 힌트에 쓴다.
+    func play(_ plan: RollPlan, skipAnimation: Bool, onCue: ((CollisionCue) -> Void)? = nil) async -> RollOutcome {
+        guard let trajectory = plan.trajectory else {
+            return RollOutcome(cues: [], trajectoryID: 0, direction: plan.direction, yaws: [])
+        }
+        let slots = plan.slots, offsets = plan.offsets
         let outcome = RollOutcome(cues: trajectory.collisions, trajectoryID: trajectory.id,
-                                  direction: usedDirection, yaws: yaws)
+                                  direction: plan.direction, yaws: plan.yaws)
 
         if skipAnimation {
             applyFrame(trajectory.frameCount - 1, of: trajectory, slots: slots, offsets: offsets)

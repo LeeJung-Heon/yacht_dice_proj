@@ -118,6 +118,36 @@ struct DiceStageHintTests {
         }
     }
 
+    @Test("계획을 세우기만 하면 주사위가 움직이지 않는다")
+    func 계획만() throws {
+        let stage = DiceStage(library: try TrajectoryLibrary.bundled())
+        let before = (0..<5).map { stage.orientation(slot: $0)! }
+        _ = stage.planRoll(values: [1, 2, 3, 4, 5], slots: [0, 1, 2, 3, 4], direction: .center)
+        for slot in 0..<5 {
+            #expect(DiceStage.rotationAngle(from: before[slot], to: stage.orientation(slot: slot)!) < 0.0001)
+        }
+    }
+
+    @Test("계획대로 재생하면 계획의 궤적·회전으로 요청한 눈에 멈춘다")
+    func 계획대로_재생() async throws {
+        let stage = DiceStage(library: try TrajectoryLibrary.bundled())
+        let values = [1, 2, 3, 4, 5]
+        let plan = stage.planRoll(values: values, slots: [0, 1, 2, 3, 4], direction: .center)
+        let outcome = await stage.play(plan, skipAnimation: true)
+        #expect(outcome.trajectoryID == plan.trajectoryID && outcome.yaws == plan.yaws && outcome.direction == plan.direction)
+        for slot in 0..<5 { #expect(stage.faceUpValue(slot: slot) == values[slot]) }
+    }
+
+    @Test("힌트로 세운 계획은 힌트의 궤적과 회전을 쓴다")
+    func 힌트_계획() throws {
+        let library = try TrajectoryLibrary.bundled()
+        let a = DiceStage(library: library), b = DiceStage(library: library)
+        let first = a.planRoll(values: [6, 6, 2], slots: [1, 2, 3], direction: .left)
+        let hint = ThrowHint(event: 0, trajectory: first.trajectoryID, direction: first.direction.rawValue, yaws: first.yaws)
+        let second = b.planRoll(values: [6, 6, 2], slots: [1, 2, 3], direction: .right, hint: hint)
+        #expect(second.trajectoryID == first.trajectoryID && second.yaws == first.yaws && second.direction == first.direction)
+    }
+
     @Test("없는 궤적 ID나 개수가 다른 힌트는 무시하고 정상 재생한다")
     func 나쁜_힌트() async throws {
         let stage = DiceStage(library: try TrajectoryLibrary.bundled())

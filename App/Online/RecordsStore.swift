@@ -45,11 +45,44 @@ final class RecordsStore {
         playerID ?? uid?.uuidString.lowercased()
     }
 
+    /// 전적을 읽을 키들. 서버는 좌석에 gamePlayerID가 적혀 있으면 그것으로, 없으면 uid로 세는데, 로그인한 사람도
+    /// Game Center 열이 생기기 전이나 그 실행에서 신원을 잇지 못했을 때 둔 판은 좌석에 uid만 남는다. 그래서
+    /// 로그인했으면 gamePlayerID와 지금 uid를 함께 읽는다. 한 판의 내 좌석은 둘 중 한 키에만 들어가 두 번 세지 않는다.
+    nonisolated static func playerKeys(playerID: String?, uid: UUID?) -> [String] {
+        var keys: [String] = []
+        if let playerID { keys.append(playerID) }
+        if let uid = uid?.uuidString.lowercased(), !keys.contains(uid) { keys.append(uid) }
+        return keys
+    }
+
+    /// 키마다 쪼개진 줄을 게임별로 더해 `player`로 묶고, 허브의 게임 순서로 늘어놓는다.
+    nonisolated static func merge(_ rows: [RecordRow], as player: String) -> [RecordRow] {
+        var totals: [String: (wins: Int, losses: Int, draws: Int)] = [:]
+        for row in rows {
+            let sum = totals[row.game] ?? (0, 0, 0)
+            totals[row.game] = (sum.wins + row.wins, sum.losses + row.losses, sum.draws + row.draws)
+        }
+        let order = GameID.allCases.map(\.rawValue)
+        let games = totals.keys.sorted { a, b in
+            switch (order.firstIndex(of: a), order.firstIndex(of: b)) {
+            case let (i?, j?): i < j
+            case (_?, nil): true
+            case (nil, _?): false
+            case (nil, nil): a < b
+            }
+        }
+        return games.map { game in
+            let sum = totals[game]!
+            return RecordRow(player: player, game: game, wins: sum.wins, losses: sum.losses, draws: sum.draws)
+        }
+    }
+
     /// 허브에 돌아올 때마다 부른다. 읽지 못한 쪽은 이미 보여주던 값을 그대로 둔다 —
     /// 잠깐 망이 끊겼다고 전적이 사라진 것처럼 보이면 안 된다.
     func reload() async {
         guard let me, let uid = service.uid else { return }
-        if let rows = await service.fetchRecords(player: me) { records = rows }
+        let keys = Self.playerKeys(playerID: gameCenter.playerID, uid: uid)
+        if let rows = await service.fetchRecords(players: keys) { records = Self.merge(rows, as: me) }
         if let rows = await service.fetchFinished() { recent = Self.summarize(rows: rows, me: me, myUid: uid) }
         guard gameCenter.playerID != nil else { return }
         for row in records {

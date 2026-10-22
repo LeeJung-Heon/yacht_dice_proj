@@ -23,7 +23,10 @@ struct GameScreen: View {
     @State private var scoreToast: String?
     @State private var toastTask: Task<Void, Never>?
 
-    var body: some View {
+    // 이모지 키보드가 열려도 판이 줄어들지 않는다 — 판 크기는 던지는 힘(컵퐁)과 터치 좌표가 기대는 값이다.
+    var body: some View { layout.ignoresSafeArea(.keyboard) }
+
+    private var layout: some View {
         GeometryReader { geometry in
             ZStack {
                 WoodBackground()
@@ -41,6 +44,7 @@ struct GameScreen: View {
                     .frame(height: geometry.size.height * (session.participants.count > 1 ? 0.37 : 0.41))
                     .contentShape(Rectangle())
                     .gesture(throwGesture)
+                    .overlay { if let reactions = session.reactions { ReactionOverlay(board: reactions) } }
                     .overlay(alignment: .top) { edgeShadow(.top) }
                     .overlay(alignment: .bottom) { edgeShadow(.bottom) }
                     Group {
@@ -200,7 +204,11 @@ struct GameScreen: View {
                     .accessibilityIdentifier("header.status")
             } else if case .remote = session.currentParticipant {
                 Text("상대 차례").font(.subheadline).foregroundStyle(theme.ivory.opacity(0.8))
+                    .lineLimit(1).minimumScaleFactor(0.8)
                     .accessibilityIdentifier("header.status")
+            }
+            if let reactions = session.reactions {
+                ReactionButton(canSend: reactions.canSend) { session.sendReaction($0) }
             }
         }
         .padding(.horizontal, 12)

@@ -52,6 +52,7 @@ struct PlayerStrip: View {
                 .accessibilityIdentifier("players.seat.\(index)")
                 .accessibilityLabel("\(participant.displayName), 총점 \(total)점\(isCurrent ? ", 현재 차례" : "")\(presenceLabel(for: participant))")
                 .accessibilityHint("탭하면 이 사람의 점수판을 본다")
+                .reactionBadge(session.reactions?.badge(for: index)?.emoji, seat: index)
             }
         }
         .padding(.horizontal, 16)

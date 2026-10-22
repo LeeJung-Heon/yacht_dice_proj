@@ -53,6 +53,8 @@ final class GameSession {
         let points: Int
     }
     private(set) var lastOpponentCommit: OpponentCommit?
+    /// 이모지 반응. 온라인이고 원격 좌석이 있을 때만 있다.
+    let reactions: ReactionBoard?
 
     // MARK: 온라인
     private let transport: (any TurnTransport)?
@@ -79,6 +81,27 @@ final class GameSession {
         self.record = record
         self.transport = transport
         self.visibleState = record.log.state
+        let participants = record.participants
+        if let transport, let mine = participants.firstIndex(where: \.isHuman),
+           let theirs = participants.firstIndex(where: { if case .remote = $0 { true } else { false } }) {
+            reactions = ReactionBoard(localSeat: mine, remoteSeat: theirs, remoteName: participants[theirs].displayName,
+                                      transport: transport)
+        } else {
+            reactions = nil
+        }
+        noteTurn()
+    }
+
+    /// 이모지를 보낸다. 온라인이 아니거나 판정·간격에 걸리면 거짓.
+    @discardableResult
+    func sendReaction(_ text: String) -> Bool {
+        reactions?.send(text, eventCount: record.log.events.count) ?? false
+    }
+
+    /// 반응 배지가 차례를 따라 사라지도록 지금 차례와 이벤트 수를 알린다. 보이는 상태가 바뀔 때마다 부른다.
+    private func noteTurn() {
+        reactions?.noteTurn(visibleState.phase == .finished ? nil : visibleState.currentPlayer,
+                            eventCount: record.log.events.count)
     }
 
     /// 테스트 호환. 혼자 연습 기록으로 감싼다.
@@ -122,6 +145,7 @@ final class GameSession {
     /// 스트림에 이미 쌓여 있던 값은 취소된 Task에도 그대로 배달되므로, 루프마다 취소를 먼저 본다.
     func startListening() {
         guard let transport, listenTask == nil else { return }
+        reactions?.start()
         listenTask = Task { [weak self] in
             for await update in transport.incoming {
                 if Task.isCancelled { return }
@@ -189,6 +213,7 @@ final class GameSession {
         record = MatchRecord(mode: record.mode, participants: record.participants,
                              log: MatchLog(playerCount: record.participants.count))
         visibleState = record.log.state
+        noteTurn()
         nextThrowDirection = nil
         pendingHandoff = false
         throwHints = []
@@ -223,8 +248,8 @@ final class GameSession {
 
         switch intent {
         case .roll:
+            // 굴림은 performRoll이 착지를 기다리지 않고 이미 올렸다.
             await performRoll()
-            await publishProgressIfOnline()
         case .toggleHold(let index):
             await commitEvents([.holdToggled(index)])
             stage.placeHeld(visibleState.held.sorted(), values: visibleState.dice)
@@ -262,6 +287,7 @@ final class GameSession {
     /// 이 판을 접는다. 화면을 떠난 세션이 계속 수신·재생하며 살아 있지 않도록 컨테이너가 부른다.
     /// 다시 `startListening()`을 부르면 처음처럼 새 루프가 뜬다.
     func stop() {
+        reactions?.stop()
         listenTask?.cancel(); listenTask = nil
         presenceTask?.cancel(); presenceTask = nil
         connectionTask?.cancel(); connectionTask = nil
@@ -311,6 +337,30 @@ final class GameSession {
                            turnSeat: turnSeat, winnerSeat: winner, finished: finished)
     }
 
+    /// 굴림을 담은 payload. 아직 착지하지 않아 `record`에 없는 굴림과 힌트를 덧붙여 싼다. 온라인이 아니면 nil.
+    private func rollPayload(values: [Int], hint: ThrowHint) -> TurnPayload? {
+        guard transport != nil else { return nil }
+        var log = record.log
+        log.append(.rolled(values))
+        guard let encoded = try? log.encoded() else {
+            lastTransportError = "서버에 보내지 못해 다시 시도하는 중이다"
+            return nil
+        }
+        return TurnPayload(log: encoded, eventCount: log.events.count, hints: throwHints + [hint],
+                           turnSeat: visibleState.currentPlayer, winnerSeat: nil, finished: false)
+    }
+
+    /// 미리 싼 payload를 올린다. 싸는 일은 부르기 전에 끝나 있어 연출과 동시에 돌려도 상태를 읽지 않는다.
+    private func publish(_ payload: TurnPayload?) async {
+        guard let transport, let payload else { return }
+        do {
+            try await transport.publish(payload)
+            lastTransportError = nil
+        } catch {
+            lastTransportError = "서버에 보내지 못해 다시 시도하는 중이다"
+        }
+    }
+
     /// 상대 플레이를 재생할 때 이벤트 사이에 두는 뜸. 실제 상대의 손놀림보다 빨리 지나가면 뭘 했는지 읽을 수 없다.
     static let remotePauseAfterRoll: Duration = .milliseconds(700)
     static let remotePauseAfterHold: Duration = .milliseconds(600)
@@ -323,6 +373,8 @@ final class GameSession {
 
     /// 상대가 보낸 로그에서 내가 모르는 이벤트만 검증하며 재생한다.
     /// 굴림은 3D로 보여주고, 고정·기록은 적용한 뒤 잠깐 멈춰 눈으로 따라올 시간을 준다.
+    /// 뜸은 한 번에 받은 이벤트 사이에만 둔다. 상대가 고정을 빠르게 바꾸면 이벤트가 하나씩 따로 오는데,
+    /// 그 끝마다 쉬면 다음 갱신이 그만큼 밀려 내 화면이 점점 뒤처진다.
     private func replay(remote update: RemoteUpdate) async {
         guard let log = try? MatchLog.decoded(from: update.log) else {
             lastTransportError = "상대의 기록을 읽을 수 없다"
@@ -340,8 +392,10 @@ final class GameSession {
             if log.events.count > mine.count { lastTransportError = "상대의 기록이 내 기록과 어긋난다" }
             return
         }
+        let arrived = log.events.count - mine.count
         for (offset, event) in log.events.dropFirst(mine.count).enumerated() {
             let eventIndex = mine.count + offset
+            let isLast = offset == arrived - 1
             guard visibleState.canApply(event) else {
                 lastTransportError = "상대가 보낸 이벤트가 규칙에 맞지 않는다: \(event)"
                 return
@@ -357,20 +411,20 @@ final class GameSession {
                                      onCue: { [weak self] cue in self?.onCollisionCue?(cue) })
                 record.log.append(event)
                 visibleState = visibleState.applying(event)
-                await remotePause(Self.remotePauseAfterRoll)
+                if !isLast { await remotePause(Self.remotePauseAfterRoll) }
             case .holdToggled:
                 record.log.append(event)
                 visibleState = visibleState.applying(event)
                 stage.placeHeld(visibleState.held.sorted(), values: visibleState.dice)
                 onHoldToggled?()
-                await remotePause(Self.remotePauseAfterHold)
+                if !isLast { await remotePause(Self.remotePauseAfterHold) }
             case .committed(let category, let points):
                 let seat = visibleState.currentPlayer
                 record.log.append(event)
                 visibleState = visibleState.applying(event)
                 onCommitted?(category, points, false)
                 lastOpponentCommit = OpponentCommit(seat: seat, category: category, points: points)
-                await remotePause(Self.remotePauseAfterCommit)
+                if !isLast { await remotePause(Self.remotePauseAfterCommit) }
             case .gameEnded:
                 record.log.append(event)
                 visibleState = visibleState.applying(event)
@@ -379,6 +433,7 @@ final class GameSession {
                 visibleState = visibleState.applying(event)
                 stage.reset()
             }
+            noteTurn()
             isBusy = false
         }
         lastTransportError = nil
@@ -438,18 +493,26 @@ final class GameSession {
 
         let direction = nextThrowDirection ?? ThrowDirection.allCases.randomElement() ?? .center
         nextThrowDirection = nil
-        let outcome = await stage.roll(values: values, slots: slots,
-                                       direction: direction, skipAnimation: reduceMotion,
+        let plan = stage.planRoll(values: values, slots: slots, direction: direction)
+        // 이 굴림의 이벤트 번호에 힌트를 매긴다.
+        let hint = ThrowHint(event: record.log.events.count, trajectory: plan.trajectoryID,
+                             direction: plan.direction.rawValue, yaws: plan.yaws)
+        // 착지를 기다리지 않고 올린다 — 상대 화면이 같은 던지기를 거의 함께 시작한다.
+        // 내 화면은 지금처럼 착지한 뒤에 드러내고, 전송은 드러낸 다음에야 기다려 느린 망이 착지를 붙잡지 않는다.
+        let payload = rollPayload(values: values, hint: hint)
+        async let published: Void = publish(payload)
+        let outcome = await stage.play(plan, skipAnimation: reduceMotion,
                                        onCue: { [weak self] cue in self?.onCollisionCue?(cue) })
         onCollisionCues?(outcome.cues)
 
-        // 착지한 뒤에 노출한다. 이 굴림의 이벤트 번호에 힌트를 매긴다.
-        throwHints.append(ThrowHint(event: record.log.events.count, trajectory: outcome.trajectoryID,
-                                    direction: outcome.direction.rawValue, yaws: outcome.yaws))
+        // 착지한 뒤에 노출한다.
+        throwHints.append(hint)
         record.log.append(.rolled(values))
         visibleState = pending
+        noteTurn()
         try? await driver.submit(.rolled(values))
         onLogChanged?(record)
+        await published
     }
 
     private func commitEvents(_ events: [Event]) async {
@@ -460,6 +523,7 @@ final class GameSession {
             try? await driver.submit(event)
         }
         visibleState = state
+        noteTurn()
         onLogChanged?(record)
     }
 }

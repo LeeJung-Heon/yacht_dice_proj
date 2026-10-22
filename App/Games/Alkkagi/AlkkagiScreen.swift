@@ -34,6 +34,14 @@ struct AlkkagiScreen: View {
     @State private var isPlaying = false
     @State private var turnBanner: String?
     @State private var toast: String?
+    /// 상대가 끌고 있는 돌과 그 손끝을 잇는 트랙. 받은 값 사이를 100ms씩 이어 그린다.
+    struct RemoteTrack {
+        let stone: Int
+        var track: AlkkagiLiveTrack
+    }
+    @State private var remoteTrack: RemoteTrack?
+    /// 받은 순간 상태를 한 번만 풀어 둔다. 판은 재생·보간 중 프레임마다 그려지므로 그때마다 JSON을 읽지 않는다.
+    @State private var remoteState: AlkkagiLive?
     /// 채널이 3초 넘게 끊겨 있을 때만 띠를 보인다. 짧은 재접속은 조용히 지나간다.
     @State private var showDisconnected = false
     @State private var disconnectTask: Task<Void, Never>?
@@ -46,6 +54,8 @@ struct AlkkagiScreen: View {
         var stones = match.state.stones
         // 초안은 내가 놓을 차례에만 얹는다 — 상대가 놓는 동안 내 자리는 비어 있고 명패도 0을 든다.
         if placingSeat == mySeat { stones[mySeat] = myDraft.map { Optional($0) } }
+        // 상대가 놓는 중이면 상대가 지금 보고 있는 초안을 그 자리에 얹는다.
+        else if let placingSeat, let draft = remoteLive?.draft() { stones[placingSeat] = draft.points.map { Optional($0) } }
         return stones
     }
     /// 그 시각에 그릴 배치. 재생 중이면 흐른 시간으로 프레임 사이를 이어 내고, 아니면 늘 그리던 것이다.
@@ -68,6 +78,38 @@ struct AlkkagiScreen: View {
         guard match.state.phase == .setup, isMyPlacement, let grabbed, let finger else { return nil }
         return (mySeat, grabbed, finger)
     }
+    /// 상대가 지금 하는 것. 온라인에서 상대 차례이고 재생 중이 아닐 때만 있다.
+    private var remoteLive: AlkkagiLive? {
+        guard match.mode.isOnline, !match.isLocalTurn, !isPlaying else { return nil }
+        return remoteState
+    }
+    /// 그 시각의 상대 손끝. 같은 돌의 트랙이 있으면 이어 그린 자리, 없으면 받은 자리다.
+    private func remotePoint(stone: Int, received: Alkkagi.Point, at date: Date) -> Alkkagi.Point {
+        guard let remoteTrack, remoteTrack.stone == stone else { return received }
+        return remoteTrack.track.point(at: date)
+    }
+    /// 상대의 당김. 보내는 쪽 화면과 같은 당김선·조준선·하이라이트를 그린다.
+    private func remoteAim(at date: Date) -> (stone: Int, from: Alkkagi.Point, to: Alkkagi.Point)? {
+        guard let aim = remoteLive?.aim(in: match.state) else { return nil }
+        return (aim.stone, aim.from, remotePoint(stone: aim.stone, received: aim.to, at: date))
+    }
+    /// 상대가 배치 중에 끌고 있는 돌.
+    private func remoteDragging(at date: Date) -> (seat: Int, stone: Int, at: Alkkagi.Point)? {
+        guard let placingSeat, placingSeat != mySeat, let dragging = remoteLive?.draft()?.dragging else { return nil }
+        return (placingSeat, dragging.stone, remotePoint(stone: dragging.stone, received: dragging.at, at: date))
+    }
+    private func boardPull(at date: Date) -> (from: Alkkagi.Point, to: Alkkagi.Point, clamped: Bool)? {
+        if let drawnPull { return drawnPull }
+        guard let aim = remoteAim(at: date) else { return nil }
+        let to = AlkkagiGeometry.clampPull(from: aim.from, to: aim.to)
+        return (aim.from, to, to != aim.to)
+    }
+    private func boardPreview(at date: Date) -> [Alkkagi.Point] {
+        guard pull == nil, let aim = remoteAim(at: date) else { return previewPath }
+        guard let flick = AlkkagiGeometry.flick(stone: aim.stone, from: aim.from, to: aim.to) else { return [] }
+        return AlkkagiGeometry.preview(state: match.state, flick: flick)
+    }
+
     /// 화면이 보이는 차례. 수는 재생을 기다리지 않고 먼저 들어가므로, 재생 중에는 튕긴 좌석을 그대로 든다.
     private var displayedSeat: Int? { playing != nil ? replayingSeat : Alkkagi.currentSeat(match.state) }
     private func displayedRemaining(seat: Int) -> Int { displayedStones[seat].compactMap { $0 }.count }
@@ -102,7 +144,10 @@ struct AlkkagiScreen: View {
         return AlkkagiGeometry.preview(state: match.state, flick: flick)
     }
 
-    var body: some View {
+    // 이모지 키보드가 열려도 판이 줄어들지 않는다 — 판 크기는 던지는 힘(컵퐁)과 터치 좌표가 기대는 값이다.
+    var body: some View { layout.ignoresSafeArea(.keyboard) }
+
+    private var layout: some View {
         ZStack {
             WoodBackground()
             VStack(spacing: 8) {
@@ -111,16 +156,20 @@ struct AlkkagiScreen: View {
                 GeometryReader { proxy in
                     // 시계는 재생 중에만 돈다 — 그동안은 화면 주사율마다 불려 프레임 사이를 이어 그리고,
                     // 멎으면 여느 뷰처럼 상태가 바뀔 때만 다시 그린다.
-                    TimelineView(.animation(paused: replay == nil)) { context in
-                        AlkkagiBoardView(stones: renderedStones(at: context.date), flipped: flipped, pull: drawnPull,
-                                         preview: previewPath, highlight: grabbed, highlightSeat: displayedSeat ?? 0,
-                                         homeShade: placingSeat.map { Alkkagi.homeRange(seat: $0) }, dragging: draggingDraft,
+                    // 상대가 끄는 손끝을 잇는 동안에도 돈다.
+                    TimelineView(.animation(paused: replay == nil && remoteTrack == nil)) { context in
+                        AlkkagiBoardView(stones: renderedStones(at: context.date), flipped: flipped, pull: boardPull(at: context.date),
+                                         preview: boardPreview(at: context.date), highlight: grabbed ?? remoteAim(at: context.date)?.stone,
+                                         highlightSeat: displayedSeat ?? 0,
+                                         homeShade: placingSeat.map { Alkkagi.homeRange(seat: $0) },
+                                         dragging: draggingDraft ?? remoteDragging(at: context.date),
                                          map: match.state.map)
                             .contentShape(Rectangle())
                             .gesture(dragGesture(size: proxy.size))
                     }
                 }
                 .aspectRatio(1, contentMode: .fit)
+                .overlay { if let reactions = match.reactions { ReactionOverlay(board: reactions) } }
                 .padding(.horizontal, 4)
                 actionBar
                 Spacer(minLength: 0)
@@ -166,6 +215,9 @@ struct AlkkagiScreen: View {
         }
         .onDisappear {
             match.onRemoteMove = nil
+            match.publishLive(AlkkagiLive?.none)
+            remoteTrack = nil
+            remoteState = nil
             replay = nil
             placeLockTask?.cancel()
             disconnectTask?.cancel()
@@ -176,6 +228,11 @@ struct AlkkagiScreen: View {
             guard !isPlaying else { return }
             announceTurn()
         }
+        // 내 배치 차례가 열리면 기본 배치를 한 번 보인다. 상대 수의 재생이 끝나 차례가 실제로 열린 뒤라야 보내진다.
+        .onChange(of: isMyPlacement, initial: true) { _, mine in
+            if mine { match.publishLive(AlkkagiLive.setup(draft: myDraft, dragging: nil)) }
+        }
+        .onChange(of: match.remoteLive, initial: true) { _, _ in followRemote() }
         .onChange(of: placingSeat, initial: true) { old, seat in
             // 내가 놓을 차례가 되면 기본 배치에서 시작한다 — 로컬 2인은 좌석이 넘어갈 때마다 다시 채운다.
             if let seat, seat == mySeat { draft = (seat, Alkkagi.defaultPlacement(seat: seat)) }
@@ -200,7 +257,31 @@ struct AlkkagiScreen: View {
             if connected { withAnimation { showDisconnected = false } }
             else { disconnectTask = Task { try? await Task.sleep(for: .seconds(3)); guard !Task.isCancelled else { return }; withAnimation { showDisconnected = true } } }
         }
-        .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await match.resync() } } }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await match.resync() } }
+            // 끌던 손이 앱을 떠난 뒤에도 상대 화면에 멈춰 남지 않게 거둔다.
+            else { match.publishLive(AlkkagiLive?.none) }
+        }
+    }
+
+    /// 상대의 새 순간 상태를 받으면 끄는 돌의 트랙을 잇는다. 다른 돌로 바뀌면 그 자리에서 새로 시작한다.
+    private func followRemote() {
+        let now = Date.now
+        remoteState = match.remoteLive(as: AlkkagiLive.self)
+        let target: (stone: Int, point: Alkkagi.Point)?
+        // 검증을 통과한 값만 잇는다. 터무니없는 좌표를 트랙에 넣으면 보간의 뺄셈이 Int를 넘친다.
+        switch remoteState {
+        case .pull?: target = remoteState?.aim(in: match.state).map { ($0.stone, $0.to) }
+        case .setup?: target = remoteState?.draft()?.dragging.map { ($0.stone, $0.at) }
+        case nil: target = nil
+        }
+        guard let target else { remoteTrack = nil; return }
+        if var current = remoteTrack, current.stone == target.stone {
+            current.track.update(target.point, at: now)
+            remoteTrack = current
+        } else {
+            remoteTrack = RemoteTrack(stone: target.stone, track: AlkkagiLiveTrack(target.point, at: now))
+        }
     }
 
     /// 머리글은 한 줄이다 — 판이 화면 폭과 높이를 최대한 쓰게 남은 자리를 줄인다.
@@ -213,7 +294,10 @@ struct AlkkagiScreen: View {
             Text(statusText)
                 .font(.caption).monospacedDigit().foregroundStyle(theme.brass).accessibilityIdentifier("header.status")
             Text(turnText)
-                .font(.caption).foregroundStyle(theme.ivory).accessibilityIdentifier("header.turn")
+                .font(.caption).foregroundStyle(theme.ivory).minimumScaleFactor(0.8).accessibilityIdentifier("header.turn")
+            if let reactions = match.reactions {
+                ReactionButton(canSend: reactions.canSend) { match.sendReaction($0) }
+            }
         }
         .lineLimit(1)
         .padding(.horizontal, 16).padding(.top, 8)
@@ -250,6 +334,7 @@ struct AlkkagiScreen: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityIdentifier("players.seat.\(seat)")
                 .accessibilityLabel("\(seatNames[seat]), \(match.state.roundWins[seat])승, 돌 \(displayedRemaining(seat: seat))개\(current ? ", 현재 차례" : "")")
+                .reactionBadge(match.reactions?.badge(for: seat)?.emoji, seat: seat)
             }
         }
         .padding(.horizontal, 16)
@@ -326,11 +411,14 @@ struct AlkkagiScreen: View {
                 if grabbed == nil {
                     grabbed = AlkkagiGeometry.stone(at: value.startLocation, stones: match.state.stones[seat], in: size, flipped: flipped)
                 }
-                guard grabbed != nil else { return }
-                finger = AlkkagiGeometry.point(at: value.location, in: size, flipped: flipped)
+                guard let grabbed else { return }
+                let point = AlkkagiGeometry.point(at: value.location, in: size, flipped: flipped)
+                finger = point
+                match.publishLive(AlkkagiLive.pull(stone: grabbed, to: point))
             }
             .onEnded { value in
                 guard match.state.phase == .play else { return setupDragEnded(value, size: size) }
+                match.publishLive(AlkkagiLive?.none)
                 defer { grabbed = nil; finger = nil }
                 guard match.isLocalTurn, !isPlaying, let grabbed, let seat = Alkkagi.currentSeat(match.state),
                       let from = match.state.stones[seat][grabbed] else { return }
@@ -367,13 +455,19 @@ struct AlkkagiScreen: View {
             grabbed = AlkkagiGeometry.stone(at: value.startLocation, stones: myDraft.map { Optional($0) },
                                             in: size, flipped: flipped)
         }
-        guard grabbed != nil else { return }
-        finger = AlkkagiGeometry.point(at: value.location, in: size, flipped: flipped)
+        guard let grabbed else { return }
+        let point = AlkkagiGeometry.point(at: value.location, in: size, flipped: flipped)
+        finger = point
+        match.publishLive(AlkkagiLive.setup(draft: myDraft, dragging: .init(stone: grabbed, at: point)))
     }
 
     /// 놓는 순간 가장 가까운 교차점에 붙인다. 진영을 벗어나거나 다른 돌에 닿는 자리면 그 돌만 있던 자리로 되돌아간다.
     private func setupDragEnded(_ value: DragGesture.Value, size: CGSize) {
-        defer { grabbed = nil; finger = nil }
+        // 놓은 결과(받아들여졌든 되돌아갔든)를 마지막으로 보인다. defer라 초안을 바꾼 뒤에 보낸다.
+        defer {
+            grabbed = nil; finger = nil
+            if isMyPlacement { match.publishLive(AlkkagiLive.setup(draft: myDraft, dragging: nil)) }
+        }
         guard isMyPlacement, let grabbed else { return }
         let to = AlkkagiGeometry.snap(finger ?? AlkkagiGeometry.point(at: value.location, in: size, flipped: flipped))
         var next = myDraft

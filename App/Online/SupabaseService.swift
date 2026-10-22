@@ -137,10 +137,10 @@ final class SupabaseService {
         }
     }
 
-    /// 서버 `records` 뷰의 내 줄들. 게임마다 한 줄이다. 읽지 못했으면 nil — 빈 배열(정말 전적이
+    /// 서버 `records` 뷰에서 이 키들의 줄. 키와 게임마다 한 줄이다. 읽지 못했으면 nil — 빈 배열(정말 전적이
     /// 없다)과 다르므로, 부르는 쪽이 이미 가진 값을 지우지 않게 가른다.
-    func fetchRecords(player: String) async -> [RecordRow]? {
-        try? await client.from("records").select().eq("player", value: player).execute().value
+    func fetchRecords(players: [String]) async -> [RecordRow]? {
+        try? await client.from("records").select().in("player", values: players).execute().value
     }
 
     /// 끝난 내 매치를 최근 순으로. RLS가 내가 낀 행만 보여준다. 읽지 못했으면 nil.

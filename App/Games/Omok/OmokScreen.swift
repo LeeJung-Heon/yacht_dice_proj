@@ -17,17 +17,22 @@ struct OmokScreen: View {
 
     private var seatNames: [String] { match.participants.map(\.displayName) }
 
-    var body: some View {
+    // 이모지 키보드가 열려도 판이 줄어들지 않는다 — 판 크기는 던지는 힘(컵퐁)과 터치 좌표가 기대는 값이다.
+    var body: some View { layout.ignoresSafeArea(.keyboard) }
+
+    private var layout: some View {
         ZStack {
             WoodBackground()
             VStack(spacing: 8) {
                 header
                 seats
-                OmokBoardView(state: match.state, preview: preview, previewSeat: match.localSeat ?? 0, animating: animating) { move in
+                OmokBoardView(state: match.state, preview: boardPreview.move, previewSeat: boardPreview.seat, animating: animating) { move in
                     guard match.isLocalTurn, Omok.canApply(move, to: match.state) else { return }
                     preview = move
+                    match.publishLive(move)
                     Haptics.shared.play(.selection)
                 }
+                .overlay { if let reactions = match.reactions { ReactionOverlay(board: reactions) } }
                 .padding(.horizontal, 4)
                 HStack {
                     Text("19 × 19 · 다섯을 먼저 이으면 승리")
@@ -64,7 +69,7 @@ struct OmokScreen: View {
             match.onRemoteMove = { move, _ in await Self.replayRemote(move, into: animating) }
         }
         // 훅을 남겨 두면 match가 클로저를, 클로저가 화면 상태를 붙잡은 채 판이 접히지 않는다.
-        .onDisappear { match.onRemoteMove = nil }
+        .onDisappear { match.onRemoteMove = nil; match.publishLive(Omok.Move?.none) }
         .onChange(of: match.log.moves.count, initial: true) { _, _ in
             preview = nil
             if match.outcome == nil, let seat = Omok.currentSeat(match.state) {
@@ -81,7 +86,17 @@ struct OmokScreen: View {
             if connected { withAnimation { showDisconnected = false } }
             else { disconnectTask = Task { try? await Task.sleep(for: .seconds(3)); guard !Task.isCancelled else { return }; withAnimation { showDisconnected = true } } }
         }
-        .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await match.resync() } } }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await match.resync() } }
+            // 골라 둔 자리가 앱을 떠난 뒤에도 상대 화면에 남지 않게 거둔다.
+            else { match.publishLive(Omok.Move?.none) }
+        }
+    }
+
+    /// 판에 반투명하게 그릴 자리와 그 색. 내 차례면 내가 고른 자리, 아니면 상대가 지금 고른 자리다.
+    private var boardPreview: (move: Omok.Move?, seat: Int) {
+        if match.isLocalTurn { return (preview, match.localSeat ?? 0) }
+        return (OmokLive.remotePreview(match.remoteLive(as: Omok.Move.self), in: match.state), Omok.currentSeat(match.state) ?? 0)
     }
 
     private var header: some View {
@@ -94,6 +109,9 @@ struct OmokScreen: View {
             Text("오목").font(.system(.title3, design: .serif, weight: .semibold)).foregroundStyle(theme.ivory)
             Spacer()
             Text("\(match.log.moves.count)수").font(.caption).monospacedDigit().foregroundStyle(theme.brass).accessibilityIdentifier("header.status")
+            if let reactions = match.reactions {
+                ReactionButton(canSend: reactions.canSend) { match.sendReaction($0) }
+            }
         }
         .padding(.leading, 4).padding(.trailing, 16)
     }
@@ -116,6 +134,7 @@ struct OmokScreen: View {
                 .background(RoundedRectangle(cornerRadius: 8).fill(current ? theme.brass : theme.paper))
                 .accessibilityIdentifier("players.seat.\(seat)")
                 .accessibilityLabel("\(seatNames[seat])\(current ? ", 현재 차례" : "")")
+                .reactionBadge(match.reactions?.badge(for: seat)?.emoji, seat: seat)
             }
         }
         .padding(.horizontal, 16)
