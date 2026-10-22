@@ -27,6 +27,8 @@ final class OmokUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["omok.board"].waitForExistence(timeout: 10))
         let board = app.descendants(matching: .any)["omok.board"]
         XCTAssertTrue(board.label.contains("19×19"))
+        // 받을 사람이 없는 로컬 대전에는 이모지 단추가 없다
+        XCTAssertFalse(app.buttons["reaction.button"].exists, "로컬 대전에 이모지 단추가 보인다")
         let screenWidth = app.windows.firstMatch.frame.width
         if screenWidth < 600 {
             XCTAssertGreaterThanOrEqual(board.frame.width, screenWidth - 12, "휴대폰에서는 판이 화면 폭을 충분히 사용해야 한다")
@@ -44,6 +46,7 @@ final class OmokUITests: XCTestCase {
         XCTAssertTrue(result.waitForExistence(timeout: 5))
         // 로컬 2인 설정은 이름을 "흑"·"백"으로 두므로 이긴 좌석까지 문구가 못 박힌다
         XCTAssertEqual(result.label, "흑 승리")
+        XCTAssertFalse(app.buttons["reaction.button"].exists, "끝난 로컬 대전에 이모지 단추가 보인다")
         app.buttons["omok.back"].tap()
         XCTAssertTrue(app.buttons["menu.omok.local"].waitForExistence(timeout: 5))
     }

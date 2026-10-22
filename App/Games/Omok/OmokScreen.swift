@@ -29,6 +29,7 @@ struct OmokScreen: View {
                     match.publishLive(move)
                     Haptics.shared.play(.selection)
                 }
+                .overlay { if let reactions = match.reactions { ReactionOverlay(board: reactions) } }
                 .padding(.horizontal, 4)
                 HStack {
                     Text("19 × 19 · 다섯을 먼저 이으면 승리")
@@ -105,6 +106,9 @@ struct OmokScreen: View {
             Text("오목").font(.system(.title3, design: .serif, weight: .semibold)).foregroundStyle(theme.ivory)
             Spacer()
             Text("\(match.log.moves.count)수").font(.caption).monospacedDigit().foregroundStyle(theme.brass).accessibilityIdentifier("header.status")
+            if let reactions = match.reactions {
+                ReactionButton(canSend: reactions.canSend) { match.sendReaction($0) }
+            }
         }
         .padding(.leading, 4).padding(.trailing, 16)
     }
@@ -127,6 +131,7 @@ struct OmokScreen: View {
                 .background(RoundedRectangle(cornerRadius: 8).fill(current ? theme.brass : theme.paper))
                 .accessibilityIdentifier("players.seat.\(seat)")
                 .accessibilityLabel("\(seatNames[seat])\(current ? ", 현재 차례" : "")")
+                .reactionBadge(match.reactions?.badges[seat]?.emoji, seat: seat)
             }
         }
         .padding(.horizontal, 16)
