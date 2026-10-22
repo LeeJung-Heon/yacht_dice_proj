@@ -23,7 +23,10 @@ struct GameScreen: View {
     @State private var scoreToast: String?
     @State private var toastTask: Task<Void, Never>?
 
-    var body: some View {
+    // 이모지 키보드가 열려도 판이 줄어들지 않는다 — 판 크기는 던지는 힘(컵퐁)과 터치 좌표가 기대는 값이다.
+    var body: some View { layout.ignoresSafeArea(.keyboard) }
+
+    private var layout: some View {
         GeometryReader { geometry in
             ZStack {
                 WoodBackground()

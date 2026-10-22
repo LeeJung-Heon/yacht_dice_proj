@@ -62,7 +62,10 @@ struct CupPongScreen: View {
         ball ?? ((match.isLocalTurn && !isThrowing) || remoteAiming ? (x: 0, y: 0, height: 400) : nil)
     }
 
-    var body: some View {
+    // 이모지 키보드가 열려도 판이 줄어들지 않는다 — 판 크기는 던지는 힘(컵퐁)과 터치 좌표가 기대는 값이다.
+    var body: some View { layout.ignoresSafeArea(.keyboard) }
+
+    private var layout: some View {
         // 세기는 화면 높이로 잰다(테이블 칸 높이가 아니다). 손을 멈춘 채 200~280pt쯤 끌면 컵 자리에 떨어진다.
         GeometryReader { screen in
             ZStack {
