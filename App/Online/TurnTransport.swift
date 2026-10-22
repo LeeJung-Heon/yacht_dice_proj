@@ -20,6 +20,13 @@ struct RemoteUpdate: Sendable, Equatable {
     let hints: [ThrowHint]
 }
 
+/// 게임 중에 보내는 이모지 반응. 저장하지 않으며 놓쳐도 판에 영향이 없다.
+struct Reaction: Sendable, Equatable {
+    let emoji: String
+    /// 보낸 순간 보낸 사람 로그의 수·이벤트 개수. 배지를 지울 때를 두 화면이 같게 정한다.
+    let eventCount: Int
+}
+
 /// 확정 전의 손놀림 한 장. 저장하지 않으며 놓쳐도 판에 영향이 없다.
 struct LiveFrame: Sendable, Equatable {
     /// 보낸 쪽 로그의 수·이벤트 개수. 받는 쪽은 자기 것과 같을 때만 그린다.
@@ -43,6 +50,10 @@ protocol TurnTransport: Sendable {
     func sendLive(_ frame: LiveFrame) async
     /// 상대의 손놀림. 기본은 빈 스트림.
     var live: AsyncStream<LiveFrame> { get }
+    /// 이모지 반응을 상대에게 보낸다. 기본은 아무것도 하지 않는다.
+    func sendReaction(_ reaction: Reaction) async
+    /// 상대의 이모지 반응. 기본은 빈 스트림.
+    var reactions: AsyncStream<Reaction> { get }
 }
 
 extension TurnTransport {
@@ -51,6 +62,8 @@ extension TurnTransport {
     func refresh() async {}
     func sendLive(_ frame: LiveFrame) async {}
     var live: AsyncStream<LiveFrame> { AsyncStream { $0.finish() } }
+    func sendReaction(_ reaction: Reaction) async {}
+    var reactions: AsyncStream<Reaction> { AsyncStream { $0.finish() } }
 }
 
 /// 같은 프로세스 안의 두 세션을 잇는다. 테스트와 디버깅용.
@@ -61,15 +74,19 @@ final class InMemoryTurnTransport: TurnTransport, @unchecked Sendable {
     private var presenceContinuation: AsyncStream<Set<String>>.Continuation?
     private var connectionContinuation: AsyncStream<Bool>.Continuation?
     private var liveContinuation: AsyncStream<LiveFrame>.Continuation?
+    private var reactionContinuation: AsyncStream<Reaction>.Continuation?
     let incoming: AsyncStream<RemoteUpdate>
     let presence: AsyncStream<Set<String>>
     let connection: AsyncStream<Bool>
     let live: AsyncStream<LiveFrame>
+    let reactions: AsyncStream<Reaction>
     private var _sent: [TurnPayload] = []
     private var _sentLive: [LiveFrame] = []
+    private var _sentReactions: [Reaction] = []
 
     var sent: [TurnPayload] { lock.withLock { _sent } }
     var sentLive: [LiveFrame] { lock.withLock { _sentLive } }
+    var sentReactions: [Reaction] { lock.withLock { _sentReactions } }
     var sentLogs: [Data] { sent.map(\.log) }
     var lastPayload: TurnPayload? { sent.last }
 
@@ -86,6 +103,9 @@ final class InMemoryTurnTransport: TurnTransport, @unchecked Sendable {
         var liveContinuation: AsyncStream<LiveFrame>.Continuation!
         live = AsyncStream(bufferingPolicy: .unbounded) { liveContinuation = $0 }
         self.liveContinuation = liveContinuation
+        var reactionContinuation: AsyncStream<Reaction>.Continuation!
+        reactions = AsyncStream(bufferingPolicy: .unbounded) { reactionContinuation = $0 }
+        self.reactionContinuation = reactionContinuation
     }
 
     static func pair(uidA: String = "a", uidB: String = "b") -> (InMemoryTurnTransport, InMemoryTurnTransport) {
@@ -105,6 +125,11 @@ final class InMemoryTurnTransport: TurnTransport, @unchecked Sendable {
     func sendLive(_ frame: LiveFrame) async {
         lock.withLock { _sentLive.append(frame) }
         peer?.liveContinuation?.yield(frame)
+    }
+
+    func sendReaction(_ reaction: Reaction) async {
+        lock.withLock { _sentReactions.append(reaction) }
+        peer?.reactionContinuation?.yield(reaction)
     }
 
     /// 테스트용: 이 쪽이 보는 채널 참가자를 바꾼다.

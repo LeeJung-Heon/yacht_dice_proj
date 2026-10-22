@@ -53,6 +53,27 @@ struct TurnTransportTests {
         #expect(a.sentLive == [frame] && b.sentLive.isEmpty)
     }
 
+    @Test("메모리 전송의 반응은 짝에게만 가고 보낸 쪽은 기억한다")
+    func 반응() async throws {
+        let (a, b) = InMemoryTurnTransport.pair()
+        var iterator = b.reactions.makeAsyncIterator()
+        let reaction = Reaction(emoji: "🔥", eventCount: 3)
+        await a.sendReaction(reaction)
+        #expect(await iterator.next() == reaction)
+        #expect(a.sentReactions == [reaction] && b.sentReactions.isEmpty)
+    }
+
+    @Test("기본 구현의 reactions는 빈 스트림이다")
+    func 기본_반응() async {
+        struct Silent: TurnTransport {
+            func publish(_ payload: TurnPayload) async throws {}
+            var incoming: AsyncStream<RemoteUpdate> { AsyncStream { $0.finish() } }
+        }
+        await Silent().sendReaction(Reaction(emoji: "🔥", eventCount: 0))
+        var iterator = Silent().reactions.makeAsyncIterator()
+        #expect(await iterator.next() == nil)
+    }
+
     @Test("기본 구현의 live는 빈 스트림이고 sendLive는 아무것도 하지 않는다")
     func 기본_순간_상태() async {
         struct Silent: TurnTransport {

@@ -40,6 +40,20 @@ struct RealtimeMessagesTests {
         #expect(try empty.frame() == LiveFrame(eventCount: 2, state: nil))
     }
 
+    @Test("ReactionMessage는 SDK의 JSONObject를 거쳐도 같은 Reaction이 된다")
+    func 반응_왕복() throws {
+        let reaction = Reaction(emoji: "👨‍👩‍👧‍👦", eventCount: 7)
+        let text = String(decoding: try JSONEncoder().encode(ReactionMessage(reaction)), as: UTF8.self)
+        #expect(text.contains("\"event_count\":7"), "\(text)")
+        let back = try AnyJSON.object(try JSONObject(ReactionMessage(reaction))).decode(as: ReactionMessage.self)
+        #expect(back.reaction == reaction)
+    }
+
+    @Test("깨진 반응 페이로드는 디코드에 실패한다")
+    func 깨진_반응() {
+        #expect(throws: (any Error).self) { try AnyJSON.object(["emoji": .integer(3)]).decode(as: ReactionMessage.self) }
+    }
+
     @Test("깨진 페이로드는 디코드에 실패한다")
     func 깨진_페이로드() {
         let broken = AnyJSON.object(["event_count": .string("x")])

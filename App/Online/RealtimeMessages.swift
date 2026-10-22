@@ -24,6 +24,24 @@ struct MoveMessage: Codable, Equatable {
     }
 }
 
+/// 채널의 클라이언트 브로드캐스트 `emoji`. 게임 중에 보내는 이모지 반응이다.
+struct ReactionMessage: Codable, Equatable {
+    let emoji: String
+    let eventCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case emoji
+        case eventCount = "event_count"
+    }
+
+    init(_ reaction: Reaction) {
+        emoji = reaction.emoji
+        eventCount = reaction.eventCount
+    }
+
+    var reaction: Reaction { Reaction(emoji: emoji, eventCount: eventCount) }
+}
+
 /// 채널의 클라이언트 브로드캐스트 `live`. 확정 전의 손놀림이며 상태는 게임별 JSON 그대로다.
 struct LiveMessage: Codable, Equatable {
     let eventCount: Int

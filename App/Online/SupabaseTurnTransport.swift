@@ -19,10 +19,12 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
     let presence: AsyncStream<Set<String>>
     let connection: AsyncStream<Bool>
     let live: AsyncStream<LiveFrame>
+    let reactions: AsyncStream<Reaction>
     private let continuation: AsyncStream<RemoteUpdate>.Continuation
     private let presenceContinuation: AsyncStream<Set<String>>.Continuation
     private let connectionContinuation: AsyncStream<Bool>.Continuation
     private let liveContinuation: AsyncStream<LiveFrame>.Continuation
+    private let reactionContinuation: AsyncStream<Reaction>.Continuation
     /// 구독 중인 채널. 빠른 길과 순간 상태는 이 채널이 `subscribed`일 때만 보낸다.
     private var channel: RealtimeChannelV2?
     private var listenTask: Task<Void, Never>?
@@ -59,6 +61,10 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
         var liveContinuation: AsyncStream<LiveFrame>.Continuation!
         live = AsyncStream(bufferingPolicy: .unbounded) { liveContinuation = $0 }
         self.liveContinuation = liveContinuation
+        // 반응은 쌓아 둘 까닭이 없다 — 조작된 상대가 퍼부어도 최근 몇 개만 남긴다.
+        var reactionContinuation: AsyncStream<Reaction>.Continuation!
+        reactions = AsyncStream(bufferingPolicy: .bufferingNewest(8)) { reactionContinuation = $0 }
+        self.reactionContinuation = reactionContinuation
 
         if realtimeEnabled {
             listenTask = Task { [weak self] in await self?.listen() }
@@ -66,6 +72,7 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
             connectionContinuation.finish()
             presenceContinuation.finish()
             liveContinuation.finish()
+            reactionContinuation.finish()
         }
 
         pollTask = Task { [weak self] in
@@ -85,6 +92,7 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
         presenceContinuation.finish()
         connectionContinuation.finish()
         liveContinuation.finish()
+        reactionContinuation.finish()
     }
 
     /// 비공개 채널을 열어 브로드캐스트·Presence·상태를 받는다. 참가자가 아니면 정책이 구독을 거부한다.
@@ -99,6 +107,7 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
         let updates = channel.broadcastStream(event: "UPDATE")
         let moves = channel.broadcastStream(event: "move")
         let lives = channel.broadcastStream(event: "live")
+        let emojis = channel.broadcastStream(event: "emoji")
         let presences = channel.presenceChange()
         let statuses = channel.statusChange
         lock.withLock { self.channel = channel }
@@ -128,6 +137,15 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
                     if let payload = json["payload"],
                        let frame = try? payload.decode(as: LiveMessage.self, decoder: JSONDecoder()).frame() {
                         self.liveContinuation.yield(frame)
+                    }
+                }
+            }
+            group.addTask { [weak self] in
+                for await json in emojis {
+                    guard let self else { return }
+                    if let payload = json["payload"],
+                       let message = try? payload.decode(as: ReactionMessage.self, decoder: JSONDecoder()) {
+                        self.reactionContinuation.yield(message.reaction)
                     }
                 }
             }
@@ -214,6 +232,15 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
         try await send(TurnUpdate(log: payload.log, hints: payload.hints, eventCount: payload.eventCount,
                                   status: payload.finished ? "finished" : "playing",
                                   turnSeat: payload.turnSeat, winnerSeat: payload.winnerSeat))
+    }
+
+    func sendReaction(_ reaction: Reaction) async {
+        guard let channel = subscribedChannel() else { return }
+        do {
+            try await channel.broadcast(event: "emoji", message: ReactionMessage(reaction))
+        } catch {
+            lock.withLock { lastBroadcastError = "\(error)" }
+        }
     }
 
     func sendLive(_ frame: LiveFrame) async {
