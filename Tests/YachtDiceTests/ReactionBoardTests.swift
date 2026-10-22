@@ -21,14 +21,16 @@ struct ReactionBoardTests {
         while !condition(), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(5)) }
     }
 
-    @Test("이모지 하나만 참이다", arguments: ["🔥", "👍🏽", "🇰🇷", "👨‍👩‍👧‍👦", "1️⃣", "❤️", "😀"])
+    @Test("이모지 하나만 참이다", arguments: ["🔥", "👍🏽", "🇰🇷", "👨‍👩‍👧‍👦", "1️⃣", "❤️", "😀", "⛹🏽‍♀️", "☝🏽", "🏳️‍🌈",
+                                         "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "🙂‍↔️", "🧑🏽‍🦯‍➡️", "#️⃣", "©️"])
     func 이모지(_ text: String) {
         #expect(ReactionBoard.isSingleEmoji(text))
     }
 
     @Test("이모지가 아니거나 둘 이상이거나 너무 길면 거짓이다",
           arguments: ["a", "1", "#", "🔥🔥", "", "🔥a", " ", "가", String(repeating: "👨‍👩‍👧‍👦", count: 3),
-                      "🔥" + String(repeating: "\u{200D}", count: 70)])
+                      "🔥" + String(repeating: "\u{200D}", count: 70),
+                      "a🏽", "좆🏽", "🇰", "🔥" + String(repeating: "\u{0301}", count: 20), "🔥\u{093E}", "1\u{FE0F}"])
     func 이모지_아님(_ text: String) {
         #expect(!ReactionBoard.isSingleEmoji(text))
     }

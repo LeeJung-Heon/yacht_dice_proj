@@ -54,13 +54,23 @@ final class ReactionBoard {
     }
 
     /// 이모지 하나만 참이다. 보내는 쪽과 받는 쪽이 같은 판정을 써서 이 통로로 글자가 오가지 않는다.
-    /// 숫자·#처럼 이모지 속성만 있고 글자로 그려지는 것은 이모지 표시 선택자나 키캡이 붙을 때만 받는다.
+    /// 첫 스칼라가 이모지로 그려지는 것이어야 하고(글자 뒤에 피부색이나 결합 부호를 붙인 것은 거짓), 나머지 스칼라도 이모지·연결자·
+    /// 이모지 표시 선택자·키캡·태그뿐이어야 한다. 국기는 지역 표시 문자 둘, 키캡은 숫자·#·*로 시작해 키캡으로 끝나야 한다.
+    /// 길이는 바이트를 먼저 보아, 크게 꾸민 문자열이 글자 수 세기에 시간을 쓰게 하지 않는다.
     static func isSingleEmoji(_ text: String) -> Bool {
-        guard text.count == 1, text.utf8.count <= maxBytes, let character = text.first else { return false }
-        let scalars = character.unicodeScalars
-        if scalars.contains(where: { $0.properties.isEmojiPresentation }) { return true }
-        guard let first = scalars.first, first.properties.isEmoji else { return false }
-        return scalars.contains { $0 == "\u{FE0F}" || $0 == "\u{20E3}" }
+        guard text.utf8.count <= maxBytes, text.count == 1, let character = text.first else { return false }
+        let scalars = Array(character.unicodeScalars)
+        let first = scalars[0], second = scalars.count > 1 ? scalars[1] : nil
+        func isRegional(_ scalar: Unicode.Scalar) -> Bool { (0x1F1E6...0x1F1FF).contains(scalar.value) }
+        if isRegional(first) { return scalars.count == 2 && isRegional(scalars[1]) }
+        if "0123456789#*".unicodeScalars.contains(first) { return scalars.last == "\u{20E3}" }
+        let properties = first.properties
+        guard properties.isEmojiPresentation
+                || (properties.isEmoji && second == "\u{FE0F}")
+                || (properties.isEmojiModifierBase && second?.properties.isEmojiModifier == true) else { return false }
+        return scalars.allSatisfy {
+            $0.properties.isEmoji || $0 == "\u{200D}" || $0 == "\u{FE0F}" || $0 == "\u{20E3}" || (0xE0020...0xE007F).contains($0.value)
+        }
     }
 
     /// 판정과 간격을 통과하면 상대에게 보내고 내 좌석으로 띄운다.
