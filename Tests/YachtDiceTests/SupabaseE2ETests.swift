@@ -287,7 +287,7 @@ struct SupabaseE2ETests {
         }
     }
 
-    @Test("게스트가 채널에 들어오면 호스트의 opponentPresent가 참이 되고 순간 상태가 상대에게 닿는다")
+    @Test("게스트가 채널에 들어오면 호스트의 opponentPresent가 참이 되고 순간 상태와 이모지 반응이 상대에게 닿는다")
     func 접속() async throws {
         let pair = try await makePair()
         let deadline = ContinuousClock.now + .seconds(8)
@@ -297,6 +297,11 @@ struct SupabaseE2ETests {
         #expect(pair.a.opponentPresent && pair.b.opponentPresent)
         #expect(pair.a.isConnected && pair.b.isConnected)
         try await expectLiveArrives(pair)
+        // 게스트 세션이 반응 스트림을 이미 읽고 있으므로 배지로 확인한다
+        #expect(pair.a.sendReaction("🔥"))
+        let arrival = ContinuousClock.now + .seconds(5)
+        while pair.b.reactions?.badges[0] == nil, ContinuousClock.now < arrival { try await Task.sleep(for: .milliseconds(50)) }
+        #expect(pair.b.reactions?.badges[0]?.emoji == "🔥", "이모지 반응이 오지 않았다: \(pair.ta.lastBroadcastError ?? "보내기 오류 없음")")
     }
 
     @Test("참가자가 아닌 계정은 비공개 채널을 구독할 수 없다")
