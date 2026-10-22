@@ -53,6 +53,8 @@ final class GameSession {
         let points: Int
     }
     private(set) var lastOpponentCommit: OpponentCommit?
+    /// 이모지 반응. 온라인이고 원격 좌석이 있을 때만 있다.
+    let reactions: ReactionBoard?
 
     // MARK: 온라인
     private let transport: (any TurnTransport)?
@@ -79,6 +81,27 @@ final class GameSession {
         self.record = record
         self.transport = transport
         self.visibleState = record.log.state
+        let participants = record.participants
+        if let transport, let mine = participants.firstIndex(where: \.isHuman),
+           let theirs = participants.firstIndex(where: { if case .remote = $0 { true } else { false } }) {
+            reactions = ReactionBoard(localSeat: mine, remoteSeat: theirs, remoteName: participants[theirs].displayName,
+                                      transport: transport)
+        } else {
+            reactions = nil
+        }
+        noteTurn()
+    }
+
+    /// 이모지를 보낸다. 온라인이 아니거나 판정·간격에 걸리면 거짓.
+    @discardableResult
+    func sendReaction(_ text: String) -> Bool {
+        reactions?.send(text, eventCount: record.log.events.count) ?? false
+    }
+
+    /// 반응 배지가 차례를 따라 사라지도록 지금 차례와 이벤트 수를 알린다. 보이는 상태가 바뀔 때마다 부른다.
+    private func noteTurn() {
+        reactions?.noteTurn(visibleState.phase == .finished ? nil : visibleState.currentPlayer,
+                            eventCount: record.log.events.count)
     }
 
     /// 테스트 호환. 혼자 연습 기록으로 감싼다.
@@ -122,6 +145,7 @@ final class GameSession {
     /// 스트림에 이미 쌓여 있던 값은 취소된 Task에도 그대로 배달되므로, 루프마다 취소를 먼저 본다.
     func startListening() {
         guard let transport, listenTask == nil else { return }
+        reactions?.start()
         listenTask = Task { [weak self] in
             for await update in transport.incoming {
                 if Task.isCancelled { return }
@@ -189,6 +213,7 @@ final class GameSession {
         record = MatchRecord(mode: record.mode, participants: record.participants,
                              log: MatchLog(playerCount: record.participants.count))
         visibleState = record.log.state
+        noteTurn()
         nextThrowDirection = nil
         pendingHandoff = false
         throwHints = []
@@ -262,6 +287,7 @@ final class GameSession {
     /// 이 판을 접는다. 화면을 떠난 세션이 계속 수신·재생하며 살아 있지 않도록 컨테이너가 부른다.
     /// 다시 `startListening()`을 부르면 처음처럼 새 루프가 뜬다.
     func stop() {
+        reactions?.stop()
         listenTask?.cancel(); listenTask = nil
         presenceTask?.cancel(); presenceTask = nil
         connectionTask?.cancel(); connectionTask = nil
@@ -407,6 +433,7 @@ final class GameSession {
                 visibleState = visibleState.applying(event)
                 stage.reset()
             }
+            noteTurn()
             isBusy = false
         }
         lastTransportError = nil
@@ -482,6 +509,7 @@ final class GameSession {
         throwHints.append(hint)
         record.log.append(.rolled(values))
         visibleState = pending
+        noteTurn()
         try? await driver.submit(.rolled(values))
         onLogChanged?(record)
         await published
@@ -495,6 +523,7 @@ final class GameSession {
             try? await driver.submit(event)
         }
         visibleState = state
+        noteTurn()
         onLogChanged?(record)
     }
 }

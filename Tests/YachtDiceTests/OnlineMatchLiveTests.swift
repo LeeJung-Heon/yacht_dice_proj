@@ -196,3 +196,89 @@ extension OnlineMatchLiveTests {
         #expect(local.remoteLive == nil)
     }
 }
+
+@Suite("OnlineMatch - 이모지 반응")
+@MainActor
+struct OnlineMatchReactionTests {
+    private func makePair() -> (OnlineMatch<Omok>, OnlineMatch<Omok>) {
+        let (ta, tb) = InMemoryTurnTransport.pair()
+        let a = OnlineMatch(game: Omok.self, mode: .online(matchID: "m"), participants: [.human(name: "A"), .remote(playerID: "b", name: "B")],
+                            log: MoveLog<Omok>(), transport: ta)
+        let b = OnlineMatch(game: Omok.self, mode: .online(matchID: "m"), participants: [.remote(playerID: "a", name: "A"), .human(name: "B")],
+                            log: MoveLog<Omok>(), transport: tb)
+        a.startListening(); b.startListening()
+        return (a, b)
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !condition(), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(5)) }
+    }
+
+    @Test("온라인은 반응을 내놓고 로컬은 없다")
+    func 있고_없음() {
+        let (a, b) = makePair()
+        #expect(a.reactions?.localSeat == 0 && a.reactions?.remoteSeat == 1 && a.reactions?.remoteName == "B")
+        #expect(b.reactions?.localSeat == 1 && b.reactions?.remoteSeat == 0)
+        let local = OnlineMatch(game: Omok.self, mode: .passAndPlay(names: ["A", "B"]), participants: [.human(name: "A"), .human(name: "B")],
+                                log: MoveLog<Omok>(), transport: nil)
+        #expect(local.reactions == nil)
+        #expect(!local.sendReaction("🔥"))
+    }
+
+    @Test("상대 수를 재생해 차례가 바뀌면 그 전의 배지가 양쪽에서 사라진다")
+    func 차례에_거둠() async {
+        let (a, b) = makePair()
+        #expect(a.sendReaction("🔥"))
+        await waitUntil { b.reactions?.badges[0] != nil }
+        #expect(b.reactions?.badges[0]?.emoji == "🔥")
+        await a.play(Omok.Move(x: 7, y: 7))
+        await b.waitForIncoming()
+        #expect(a.reactions?.badges[0] == nil && b.reactions?.badges[0] == nil)
+    }
+
+    @Test("내 수를 상대가 재생하는 중에 보낸 이모지는 재생이 끝나도 양쪽에 남는다")
+    func 재생_중_수신() async {
+        let (a, b) = makePair()
+        var replaying = false
+        var release: CheckedContinuation<Void, Never>?
+        b.onRemoteMove = { _, _ in
+            replaying = true
+            await withCheckedContinuation { release = $0 }
+        }
+        await a.play(Omok.Move(x: 5, y: 5))
+        await waitUntil { replaying }
+        #expect(a.sendReaction("😭"))
+        await waitUntil { b.reactions?.badges[0] != nil }
+        release?.resume()
+        await b.waitForIncoming()
+        b.onRemoteMove = nil
+        #expect(a.reactions?.badges[0]?.emoji == "😭")
+        #expect(b.reactions?.badges[0]?.emoji == "😭", "재생이 끝나자 받은 배지가 사라졌다")
+        await b.play(Omok.Move(x: 6, y: 6))
+        await a.waitForIncoming()
+        #expect(a.reactions?.badges[0] == nil && b.reactions?.badges[0] == nil)
+    }
+
+    @Test("판이 끝난 뒤에도 반응을 주고받는다")
+    func 끝난_뒤() async {
+        let (a, b) = makePair()
+        for x in 0..<5 {
+            await a.play(Omok.Move(x: x, y: 0)); await b.waitForIncoming()
+            if x < 4 { await b.play(Omok.Move(x: x, y: 1)); await a.waitForIncoming() }
+        }
+        #expect(a.outcome == .win(seat: 0) && b.outcome == .win(seat: 0))
+        #expect(b.sendReaction("👏"))
+        await waitUntil { a.reactions?.badges[1] != nil }
+        #expect(a.reactions?.badges[1]?.emoji == "👏")
+    }
+
+    @Test("stop()하면 반응을 받지 않는다")
+    func 접기() async throws {
+        let (a, b) = makePair()
+        b.stop()
+        a.sendReaction("🔥")
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(b.reactions?.bursts.isEmpty == true && b.reactions?.badges.isEmpty == true)
+    }
+}

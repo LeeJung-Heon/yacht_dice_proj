@@ -26,6 +26,8 @@ final class OnlineMatch<G: Game> {
     }
     /// 상대가 방금 둔 수. 화면이 팝업으로 알린다.
     private(set) var lastRemoteMove: RemoteMove?
+    /// 이모지 반응. 온라인이고 원격 좌석이 있을 때만 있다.
+    let reactions: ReactionBoard?
     /// 상대가 지금 하고 있는 것(확정 전의 손놀림). 게임별 JSON이며, 내 로그와 같은 수 위의 것이고 재생 중이 아닐 때만 있다.
     /// 상대 수가 오면 그 전의 손놀림은 수가 맞지 않아 저절로 사라지고, 같은 좌석이 이어 두며 먼저 보낸 다음 수의 손놀림은
     /// 재생이 끝나 로그가 따라잡으면 그때 보인다.
@@ -75,6 +77,25 @@ final class OnlineMatch<G: Game> {
         self.participants = participants
         self.log = log
         self.transport = transport
+        if let transport, let mine = participants.firstIndex(where: \.isHuman),
+           let theirs = participants.firstIndex(where: { if case .remote = $0 { true } else { false } }) {
+            reactions = ReactionBoard(localSeat: mine, remoteSeat: theirs, remoteName: participants[theirs].displayName,
+                                      transport: transport)
+        } else {
+            reactions = nil
+        }
+        noteTurn()
+    }
+
+    /// 이모지를 보낸다. 로컬 대전이거나 판정·간격에 걸리면 거짓.
+    @discardableResult
+    func sendReaction(_ text: String) -> Bool {
+        reactions?.send(text, eventCount: log.moves.count) ?? false
+    }
+
+    /// 반응 배지가 차례를 따라 사라지도록 지금 차례와 수를 알린다. 로그가 바뀔 때마다 부른다.
+    private func noteTurn() {
+        reactions?.noteTurn(G.currentSeat(state), eventCount: log.moves.count)
     }
 
     /// 온라인이면 내 좌석, 로컬이면 지금 둘 좌석.
@@ -96,6 +117,7 @@ final class OnlineMatch<G: Game> {
         withdrawLive()
         if let hint { hints.append(ThrowHint(event: log.moves.count, trajectory: hint.trajectory, direction: hint.direction, yaws: hint.yaws)) }
         log.append(move)
+        noteTurn()
         notifyLogChanged()
         await publish()
         notifyFinishedIfNeeded()
@@ -200,6 +222,7 @@ final class OnlineMatch<G: Game> {
     /// 스트림에 이미 쌓여 있던 값은 취소된 Task에도 그대로 배달되므로, 루프마다 취소를 먼저 본다.
     func startListening() {
         guard let transport, listenTask == nil else { return }
+        reactions?.start()
         listenTask = Task { [weak self] in
             for await update in transport.incoming {
                 if Task.isCancelled { return }
@@ -246,6 +269,7 @@ final class OnlineMatch<G: Game> {
     func stop() {
         // 끌던 손놀림이 상대 화면에 멈춰 남지 않게 먼저 거둔다. 보내기 사슬은 끊지 않는다.
         withdrawLive()
+        reactions?.stop()
         listenTask?.cancel(); listenTask = nil
         presenceTask?.cancel(); presenceTask = nil
         connectionTask?.cancel(); connectionTask = nil
@@ -286,6 +310,7 @@ final class OnlineMatch<G: Game> {
             let hint = hints.first { $0.event == mine.count + offset }
             await onRemoteMove?(move, hint)
             log.append(move)
+            noteTurn()
             appended = true
             lastRemoteMove = RemoteMove(seat: seat, move: move)
         }

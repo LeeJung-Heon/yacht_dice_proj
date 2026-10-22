@@ -108,6 +108,25 @@ struct GameSessionOnlineTests {
         #expect(gap < .milliseconds(300), "두 번째 고정이 \(gap) 뒤에야 보였다")
     }
 
+    @Test("요트 온라인 세션은 반응을 주고받고 상대 기록으로 차례가 바뀌면 배지가 사라진다")
+    func 반응() async throws {
+        let (a, b, _, _) = try makePair()
+        #expect(a.sendReaction("🔥"))
+        await waitUntil { b.reactions?.badges[0] != nil }
+        #expect(b.reactions?.badges[0]?.emoji == "🔥")
+        await a.send(.roll)
+        await a.send(.commit(.threes))
+        await b.waitForIncoming()
+        #expect(b.reactions?.badges[0] == nil && a.reactions?.badges[0] == nil)
+    }
+
+    @Test("요트 로컬 세션은 반응이 없다")
+    func 로컬_반응() throws {
+        let session = GameSession(driver: ConstantDriver(face: 3), stage: DiceStage(library: try TrajectoryLibrary.bundled()),
+                                  record: MatchRecord(mode: .solo, participants: GameMode.solo.participants, log: MatchLog(playerCount: 1)))
+        #expect(session.reactions == nil && !session.sendReaction("🔥"))
+    }
+
     @Test("A의 턴이 끝나면 B에 같은 상태가 재생되고 B의 차례가 열린다")
     func 한_턴_전파() async throws {
         let (a, b, _, _) = try makePair()
