@@ -104,6 +104,15 @@ struct ReactionBoardTests {
         #expect(a.badges[0]?.emoji == "🔥")
     }
 
+    @Test("떠오르는 동안에는 배지를 보이지 않고 떠오름이 끝나면 보인다")
+    func 배지_순서() async throws {
+        let (a, _, _, _) = makePair()
+        a.send("🔥", eventCount: 0)
+        #expect(a.badge(for: 0) == nil, "떠오르는 중에 배지가 먼저 붙었다")
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(a.badge(for: 0)?.emoji == "🔥")
+    }
+
     @Test("배지는 보낸 수 뒤에 차례가 바뀌면 사라지고 같은 차례에서는 남는다")
     func 배지_수명() {
         let (a, _, _, _) = makePair()

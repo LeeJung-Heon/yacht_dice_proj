@@ -331,7 +331,7 @@ struct AlkkagiScreen: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityIdentifier("players.seat.\(seat)")
                 .accessibilityLabel("\(seatNames[seat]), \(match.state.roundWins[seat])승, 돌 \(displayedRemaining(seat: seat))개\(current ? ", 현재 차례" : "")")
-                .reactionBadge(match.reactions?.badges[seat]?.emoji, seat: seat)
+                .reactionBadge(match.reactions?.badge(for: seat)?.emoji, seat: seat)
             }
         }
         .padding(.horizontal, 16)

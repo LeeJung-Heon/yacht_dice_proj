@@ -73,6 +73,11 @@ final class ReactionBoard {
         }
     }
 
+    /// 명패에 그릴 배지. 그 좌석의 반응이 아직 떠오르는 중이면 숨겨, 떠오름이 끝난 뒤에 배지가 남는 순서를 지킨다.
+    func badge(for seat: Int) -> Badge? {
+        bursts.contains { $0.seat == seat } ? nil : badges[seat]
+    }
+
     /// 판정과 간격을 통과하면 상대에게 보내고 내 좌석으로 띄운다.
     @discardableResult
     func send(_ text: String, eventCount: Int) -> Bool {

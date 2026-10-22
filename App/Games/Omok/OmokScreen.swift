@@ -131,7 +131,7 @@ struct OmokScreen: View {
                 .background(RoundedRectangle(cornerRadius: 8).fill(current ? theme.brass : theme.paper))
                 .accessibilityIdentifier("players.seat.\(seat)")
                 .accessibilityLabel("\(seatNames[seat])\(current ? ", 현재 차례" : "")")
-                .reactionBadge(match.reactions?.badges[seat]?.emoji, seat: seat)
+                .reactionBadge(match.reactions?.badge(for: seat)?.emoji, seat: seat)
             }
         }
         .padding(.horizontal, 16)
