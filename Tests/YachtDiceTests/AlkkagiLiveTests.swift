@@ -64,6 +64,20 @@ struct AlkkagiLiveTests {
         #expect(AlkkagiLive.pull(stone: 0, to: P(x: 0, y: 0)).draft() == nil)
     }
 
+    @Test("판에서 터무니없이 먼 좌표는 당김과 초안 모두 버린다")
+    func 먼_좌표() {
+        let state = playState()
+        for far in [P(x: 5_000_000_000, y: 0), P(x: Int.max, y: 0), P(x: 0, y: Int.min), P(x: -Alkkagi.boardMax - 1, y: 0)] {
+            #expect(AlkkagiLive.pull(stone: 0, to: far).aim(in: state) == nil, "\(far)")
+            var draft = Alkkagi.defaultPlacement(seat: 0)
+            draft[2] = far
+            #expect(AlkkagiLive.setup(draft: draft, dragging: nil).draft() == nil, "\(far)")
+            #expect(AlkkagiLive.setup(draft: Alkkagi.defaultPlacement(seat: 0), dragging: .init(stone: 0, at: far)).draft() == nil, "\(far)")
+        }
+        // 판 밖으로 조금 벗어난 손끝은 그대로 그린다 — 당김은 판 가장자리 너머까지 끌 수 있다
+        #expect(AlkkagiLive.pull(stone: 0, to: P(x: -3000, y: Alkkagi.boardMax + 3000)).aim(in: state) != nil)
+    }
+
     @Test("보간은 0ms에 직전 값, 50ms에 중간, 100ms 뒤에 새 값이다")
     func 보간() {
         let t0 = Date(timeIntervalSinceReferenceDate: 1000)

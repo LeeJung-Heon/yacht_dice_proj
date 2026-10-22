@@ -265,9 +265,10 @@ struct AlkkagiScreen: View {
         let now = Date.now
         remoteState = match.remoteLive(as: AlkkagiLive.self)
         let target: (stone: Int, point: Alkkagi.Point)?
+        // 검증을 통과한 값만 잇는다. 터무니없는 좌표를 트랙에 넣으면 보간의 뺄셈이 Int를 넘친다.
         switch remoteState {
-        case .pull(let stone, let to)?: target = (stone, to)
-        case .setup(_, let dragging)?: target = dragging.map { ($0.stone, $0.at) }
+        case .pull?: target = remoteState?.aim(in: match.state).map { ($0.stone, $0.to) }
+        case .setup?: target = remoteState?.draft()?.dragging.map { ($0.stone, $0.at) }
         case nil: target = nil
         }
         guard let target else { remoteTrack = nil; return }
