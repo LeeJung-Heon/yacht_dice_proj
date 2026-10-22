@@ -26,6 +26,8 @@ final class OnlineMatch<G: Game> {
     }
     /// 상대가 방금 둔 수. 화면이 팝업으로 알린다.
     private(set) var lastRemoteMove: RemoteMove?
+    /// 상대가 지금 하고 있는 것(확정 전의 손놀림). 게임별 JSON이며, 내 로그와 수가 다르거나 상대 수가 오면 nil이다.
+    private(set) var remoteLive: Data?
 
     /// 상대 수를 화면에서 재생한다. 끝날 때까지 다음 수를 넘기지 않는다.
     var onRemoteMove: (@MainActor (G.Move, ThrowHint?) async -> Void)?
@@ -40,7 +42,25 @@ final class OnlineMatch<G: Game> {
     private var presenceTask: Task<Void, Never>?
     private var connectionTask: Task<Void, Never>?
     private var replayTask: Task<Void, Never>?
+    private var liveTask: Task<Void, Never>?
     private var hints: [ThrowHint] = []
+
+    /// 순간 상태를 묶는 간격. 이보다 자주 바뀌면 간격이 찰 때 가장 최근 값만 보낸다.
+    static var liveInterval: Duration { .milliseconds(100) }
+    /// 키 순서를 고정한다. 같은 값이 인코딩마다 다른 바이트가 되면 "같은 값은 다시 보내지 않는다"가 깨진다.
+    private static var liveEncoder: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return encoder
+    }
+    /// 마지막으로 보낸 프레임과 그 시각. 같은 프레임은 다시 보내지 않는다.
+    private var liveLastSent: LiveFrame?
+    private var liveLastSentAt: ContinuousClock.Instant?
+    /// 간격이 차기를 기다리는 가장 최근 값.
+    private var livePending: LiveFrame?
+    private var liveFlushTask: Task<Void, Never>?
+    /// 보내기 사슬의 끝. 앞의 보내기가 끝난 뒤 이어 보내야 손을 뗀 nil이 앞선 당김보다 먼저 닿지 않는다.
+    private var liveSendChain: Task<Void, Never>?
 
     init(game: G.Type, mode: GameMode, participants: [Participant], log: MoveLog<G>, transport: (any TurnTransport)?) {
         precondition(participants.count == G.seatCount)
@@ -81,6 +101,61 @@ final class OnlineMatch<G: Game> {
     }
 
     func encodedLog() throws -> Data { try log.encoded() }
+
+    // MARK: 순간 상태
+
+    /// 내 손놀림을 상대에게 흘린다. 로컬 2인이거나 내 차례가 아니면 보내지 않는다.
+    /// nil은 손을 뗐다는 뜻이라, 앞서 보낸 것이 있으면 차례와 무관하게 들고 있던 값을 버리고 바로 보낸다.
+    func publishLive<L: Encodable>(_ state: L?) {
+        guard transport != nil else { return }
+        guard let state else { return withdrawLive() }
+        guard isLocalTurn, let data = try? Self.liveEncoder.encode(state) else { return }
+        let frame = LiveFrame(eventCount: log.moves.count, state: data)
+        guard frame != liveLastSent else {
+            // 들고 있던 값이 무엇이든 지금 보이는 것은 이미 보낸 그것이다.
+            livePending = nil
+            return
+        }
+        if let last = liveLastSentAt, ContinuousClock.now - last < Self.liveInterval {
+            livePending = frame
+            guard liveFlushTask == nil else { return }
+            let wait = Self.liveInterval - (ContinuousClock.now - last)
+            liveFlushTask = Task { [weak self] in
+                try? await Task.sleep(for: wait)
+                guard !Task.isCancelled, let self else { return }
+                self.liveFlushTask = nil
+                guard let pending = self.livePending else { return }
+                self.livePending = nil
+                self.sendLiveNow(pending)
+            }
+            return
+        }
+        sendLiveNow(frame)
+    }
+
+    /// 상대의 순간 상태를 게임의 타입으로 읽는다. 읽을 수 없으면 nil.
+    func remoteLive<L: Decodable>(as type: L.Type) -> L? {
+        remoteLive.flatMap { try? JSONDecoder().decode(L.self, from: $0) }
+    }
+
+    /// 들고 있던 값을 버리고, 앞서 보낸 손놀림이 있으면 nil로 거둔다.
+    private func withdrawLive() {
+        livePending = nil
+        liveFlushTask?.cancel(); liveFlushTask = nil
+        guard liveLastSent?.state != nil else { return }
+        sendLiveNow(LiveFrame(eventCount: log.moves.count, state: nil))
+    }
+
+    private func sendLiveNow(_ frame: LiveFrame) {
+        guard let transport else { return }
+        liveLastSent = frame
+        liveLastSentAt = .now
+        let previous = liveSendChain
+        liveSendChain = Task {
+            await previous?.value
+            await transport.sendLive(frame)
+        }
+    }
 
     /// 로그가 바뀌었다고 화면·저장소에 알린다. 끝났으면 nil(지우라는 뜻)을 준다.
     /// 인코딩이 실패하면 — 끝나지 않았는데도 — 알리지 않는다. 알리면 저장소가 그 nil을 "지워라"로 읽어
@@ -130,13 +205,27 @@ final class OnlineMatch<G: Game> {
         presenceTask = Task { [weak self] in
             for await present in transport.presence {
                 if Task.isCancelled { return }
-                self?.opponentPresent = remoteID.map { present.contains($0) } ?? !present.isEmpty
+                guard let self else { return }
+                self.opponentPresent = remoteID.map { present.contains($0) } ?? !present.isEmpty
+                // 떠난 상대의 손놀림은 그대로 멈춰 남지 않게 거둔다.
+                if !self.opponentPresent { self.remoteLive = nil }
             }
         }
         connectionTask = Task { [weak self] in
             for await connected in transport.connection {
                 if Task.isCancelled { return }
-                self?.isConnected = connected
+                guard let self else { return }
+                self.isConnected = connected
+                if !connected { self.remoteLive = nil }
+            }
+        }
+        liveTask = Task { [weak self] in
+            for await frame in transport.live {
+                if Task.isCancelled { return }
+                guard let self else { return }
+                // 다른 수 위에서 한 손놀림이다 — 늦게 온 지난 차례의 것이거나 아직 재생하지 못한 수 뒤의 것이다.
+                guard frame.eventCount == self.log.moves.count else { continue }
+                self.remoteLive = frame.state
             }
         }
     }
@@ -144,10 +233,14 @@ final class OnlineMatch<G: Game> {
     /// 이 판을 접는다. 화면을 떠난 세션이 계속 수신·재생하며 살아 있지 않도록 컨테이너가 부른다.
     /// 다시 `startListening()`을 부르면 처음처럼 새 루프가 뜬다.
     func stop() {
+        // 끌던 손놀림이 상대 화면에 멈춰 남지 않게 먼저 거둔다. 보내기 사슬은 끊지 않는다.
+        withdrawLive()
         listenTask?.cancel(); listenTask = nil
         presenceTask?.cancel(); presenceTask = nil
         connectionTask?.cancel(); connectionTask = nil
         replayTask?.cancel(); replayTask = nil
+        liveTask?.cancel(); liveTask = nil
+        remoteLive = nil
     }
 
     func resync() async { await transport?.refresh() }
@@ -164,6 +257,8 @@ final class OnlineMatch<G: Game> {
             if theirs.moves.count > mine.count { lastTransportError = "상대의 기록이 내 기록과 어긋난다" }
             return
         }
+        // 상대가 수를 두었으니 그 전의 손놀림은 끝났다.
+        remoteLive = nil
         isReplaying = true
         defer { isReplaying = false }
         // 상대의 마지막 수로 판이 끝났을 수 있다. 로그를 알린 뒤에 부르려고 먼저 선언한다.

@@ -42,4 +42,26 @@ struct TurnTransportTests {
         var iterator = a.presence.makeAsyncIterator()
         #expect(await iterator.next() == ["b"])
     }
+
+    @Test("메모리 전송의 순간 상태는 짝에게만 가고 보낸 쪽은 기억한다")
+    func 순간_상태() async throws {
+        let (a, b) = InMemoryTurnTransport.pair()
+        var iterator = b.live.makeAsyncIterator()
+        let frame = LiveFrame(eventCount: 2, state: Data("{\"x\":1}".utf8))
+        await a.sendLive(frame)
+        #expect(await iterator.next() == frame)
+        #expect(a.sentLive == [frame] && b.sentLive.isEmpty)
+    }
+
+    @Test("기본 구현의 live는 빈 스트림이고 sendLive는 아무것도 하지 않는다")
+    func 기본_순간_상태() async {
+        struct Silent: TurnTransport {
+            func publish(_ payload: TurnPayload) async throws {}
+            var incoming: AsyncStream<RemoteUpdate> { AsyncStream { $0.finish() } }
+        }
+        let silent = Silent()
+        await silent.sendLive(LiveFrame(eventCount: 0, state: nil))
+        var iterator = silent.live.makeAsyncIterator()
+        #expect(await iterator.next() == nil)
+    }
 }
