@@ -23,9 +23,10 @@ struct OmokScreen: View {
             VStack(spacing: 8) {
                 header
                 seats
-                OmokBoardView(state: match.state, preview: preview, previewSeat: match.localSeat ?? 0, animating: animating) { move in
+                OmokBoardView(state: match.state, preview: boardPreview.move, previewSeat: boardPreview.seat, animating: animating) { move in
                     guard match.isLocalTurn, Omok.canApply(move, to: match.state) else { return }
                     preview = move
+                    match.publishLive(move)
                     Haptics.shared.play(.selection)
                 }
                 .padding(.horizontal, 4)
@@ -64,7 +65,7 @@ struct OmokScreen: View {
             match.onRemoteMove = { move, _ in await Self.replayRemote(move, into: animating) }
         }
         // 훅을 남겨 두면 match가 클로저를, 클로저가 화면 상태를 붙잡은 채 판이 접히지 않는다.
-        .onDisappear { match.onRemoteMove = nil }
+        .onDisappear { match.onRemoteMove = nil; match.publishLive(Omok.Move?.none) }
         .onChange(of: match.log.moves.count, initial: true) { _, _ in
             preview = nil
             if match.outcome == nil, let seat = Omok.currentSeat(match.state) {
@@ -81,7 +82,17 @@ struct OmokScreen: View {
             if connected { withAnimation { showDisconnected = false } }
             else { disconnectTask = Task { try? await Task.sleep(for: .seconds(3)); guard !Task.isCancelled else { return }; withAnimation { showDisconnected = true } } }
         }
-        .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await match.resync() } } }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await match.resync() } }
+            // 골라 둔 자리가 앱을 떠난 뒤에도 상대 화면에 남지 않게 거둔다.
+            else { match.publishLive(Omok.Move?.none) }
+        }
+    }
+
+    /// 판에 반투명하게 그릴 자리와 그 색. 내 차례면 내가 고른 자리, 아니면 상대가 지금 고른 자리다.
+    private var boardPreview: (move: Omok.Move?, seat: Int) {
+        if match.isLocalTurn { return (preview, match.localSeat ?? 0) }
+        return (OmokLive.remotePreview(match.remoteLive(as: Omok.Move.self), in: match.state), Omok.currentSeat(match.state) ?? 0)
     }
 
     private var header: some View {
