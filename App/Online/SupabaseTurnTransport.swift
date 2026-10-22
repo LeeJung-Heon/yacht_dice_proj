@@ -3,11 +3,13 @@ import Supabase
 
 /// `matches` 행 하나를 `TurnTransport`로 감싼다.
 ///
-/// 상대 턴은 두 길로 받는다. 행이 바뀌면 DB 트리거가 비공개 채널 `match:<id>`로 행 전체를 쏘고(Broadcast from Database),
+/// 상대 턴은 세 길로 받는다. 상대가 수를 두면 DB를 기다리지 않고 비공개 채널 `match:<id>`에 클라이언트 브로드캐스트
+/// `move`로 로그를 먼저 보내고(빠른 길), 이어서 행을 갱신하면 DB 트리거가 같은 채널로 행 전체를 쏘며(Broadcast from Database),
 /// iOS가 앱을 뒤로 보내거나 화면을 잠그면 소켓이 끊기고 그 사이의 변경은 다시 오지 않으므로 몇 초마다 행을 직접 읽는 폴링이
-/// 항상 같이 돈다. 두 길이 같은 로그를 두 번 주더라도 `lastSeenCount`로 걸러 한 번만 흘린다.
-/// 같은 채널의 Presence로 상대가 붙어 있는지를, 채널 상태로 연결이 살아 있는지를 흘린다.
-/// 내 갱신이 실패하면 재시도하고, 그래도 안 되면 폴링 주기마다 다시 보낸다.
+/// 항상 같이 돈다. 여러 길이 같은 로그를 거듭 주더라도 `lastSeenCount`로 걸러 한 번만 흘린다.
+/// 같은 채널의 Presence로 상대가 붙어 있는지를, 채널 상태로 연결이 살아 있는지를, `live`로 확정 전의 손놀림을 흘린다.
+/// 내 갱신이 실패하면 재시도하고, 그래도 안 되면 폴링 주기마다 다시 보낸다. 갱신은 서버의 `event_count`가 더 작을 때만
+/// 걸려, 빠른 길로 내 수를 먼저 받은 상대가 그 위에 둔 새 로그를 늦게 도착한 내 옛 갱신이 덮지 못한다.
 final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
     static let pollInterval: Duration = .seconds(3)
 
@@ -16,9 +18,13 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
     let incoming: AsyncStream<RemoteUpdate>
     let presence: AsyncStream<Set<String>>
     let connection: AsyncStream<Bool>
+    let live: AsyncStream<LiveFrame>
     private let continuation: AsyncStream<RemoteUpdate>.Continuation
     private let presenceContinuation: AsyncStream<Set<String>>.Continuation
     private let connectionContinuation: AsyncStream<Bool>.Continuation
+    private let liveContinuation: AsyncStream<LiveFrame>.Continuation
+    /// 구독 중인 채널. 빠른 길과 순간 상태는 이 채널이 `subscribed`일 때만 보낸다.
+    private var channel: RealtimeChannelV2?
     private var listenTask: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?
     private let lock = NSLock()
@@ -32,6 +38,11 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
     private(set) var lastSendError: String?
     /// 채널이 구독된 상태인가. 진단용.
     private(set) var isSubscribed = false
+    /// 빠른 길로 들어와 새 것으로 인정된 갱신의 수. 진단용.
+    var fastPathDeliveries: Int { lock.withLock { _fastPathDeliveries } }
+    private var _fastPathDeliveries = 0
+    /// 빠른 길이나 순간 상태를 보내지 못한 이유. 진단용이며, 보내지 못해도 DB 경로가 받친다.
+    private(set) var lastBroadcastError: String?
 
     init(client: SupabaseClient, matchID: UUID, realtimeEnabled: Bool = true) {
         self.client = client
@@ -45,12 +56,16 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
         var connectionContinuation: AsyncStream<Bool>.Continuation!
         connection = AsyncStream(bufferingPolicy: .bufferingNewest(1)) { connectionContinuation = $0 }
         self.connectionContinuation = connectionContinuation
+        var liveContinuation: AsyncStream<LiveFrame>.Continuation!
+        live = AsyncStream(bufferingPolicy: .unbounded) { liveContinuation = $0 }
+        self.liveContinuation = liveContinuation
 
         if realtimeEnabled {
             listenTask = Task { [weak self] in await self?.listen() }
         } else {
             connectionContinuation.finish()
             presenceContinuation.finish()
+            liveContinuation.finish()
         }
 
         pollTask = Task { [weak self] in
@@ -69,6 +84,7 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
         continuation.finish()
         presenceContinuation.finish()
         connectionContinuation.finish()
+        liveContinuation.finish()
     }
 
     /// 비공개 채널을 열어 브로드캐스트·Presence·상태를 받는다. 참가자가 아니면 정책이 구독을 거부한다.
@@ -81,8 +97,11 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
         await client.realtimeV2.setAuth(session.accessToken)
         let channel = client.channel(topic) { $0.isPrivate = true }
         let updates = channel.broadcastStream(event: "UPDATE")
+        let moves = channel.broadcastStream(event: "move")
+        let lives = channel.broadcastStream(event: "live")
         let presences = channel.presenceChange()
         let statuses = channel.statusChange
+        lock.withLock { self.channel = channel }
 
         await withTaskGroup(of: Void.self) { group in
             group.addTask { [weak self] in
@@ -90,7 +109,25 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
                     guard let self else { return }
                     if let record = json["payload"]?.objectValue?["record"],
                        let row = try? record.decode(as: MatchRow.self, decoder: JSONDecoder()) {
-                        self.deliver(row)
+                        self.deliver(RemoteUpdate(log: row.log, eventCount: row.eventCount, hints: row.hints), fastPath: false)
+                    }
+                }
+            }
+            group.addTask { [weak self] in
+                for await json in moves {
+                    guard let self else { return }
+                    if let payload = json["payload"],
+                       let update = try? payload.decode(as: MoveMessage.self, decoder: JSONDecoder()).remoteUpdate() {
+                        self.deliver(update, fastPath: true)
+                    }
+                }
+            }
+            group.addTask { [weak self] in
+                for await json in lives {
+                    guard let self else { return }
+                    if let payload = json["payload"],
+                       let frame = try? payload.decode(as: LiveMessage.self, decoder: JSONDecoder()).frame() {
+                        self.liveContinuation.yield(frame)
                     }
                 }
             }
@@ -127,7 +164,14 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
             }
             await group.waitForAll()
         }
+        lock.withLock { self.channel = nil }
         await channel.unsubscribe()
+    }
+
+    /// 구독 중인 채널. 구독 전이면 SDK가 REST로 대신 보내는 길을 타지 않도록 nil을 준다 — 그때는 DB 경로가 받친다.
+    private func subscribedChannel() -> RealtimeChannelV2? {
+        guard let channel = lock.withLock({ self.channel }), channel.status == .subscribed else { return nil }
+        return channel
     }
 
     private func apply(_ action: any PresenceAction) {
@@ -145,25 +189,45 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
     func refresh() async {
         guard let row: MatchRow = try? await client.from("matches").select()
             .eq("id", value: matchID.uuidString).single().execute().value else { return }
-        deliver(row)
+        deliver(RemoteUpdate(log: row.log, eventCount: row.eventCount, hints: row.hints), fastPath: false)
     }
 
-    private func deliver(_ row: MatchRow) {
+    private func deliver(_ update: RemoteUpdate, fastPath: Bool) {
         let isNew: Bool = lock.withLock {
-            guard row.eventCount > lastSeenCount else { return false }
-            lastSeenCount = row.eventCount
+            guard update.eventCount > lastSeenCount else { return false }
+            lastSeenCount = update.eventCount
+            if fastPath { _fastPathDeliveries += 1 }
             return true
         }
-        if isNew { continuation.yield(RemoteUpdate(log: row.log, eventCount: row.eventCount, hints: row.hints)) }
+        if isNew { continuation.yield(update) }
     }
 
+    /// 채널로 먼저 보내고 DB를 갱신한다. 채널로 보내지 못해도 DB 경로가 받치므로 이유만 남긴다.
     func publish(_ payload: TurnPayload) async throws {
+        if let channel = subscribedChannel() {
+            do {
+                try await channel.broadcast(event: "move", message: MoveMessage(payload))
+            } catch {
+                lock.withLock { lastBroadcastError = "\(error)" }
+            }
+        }
         try await send(TurnUpdate(log: payload.log, hints: payload.hints, eventCount: payload.eventCount,
                                   status: payload.finished ? "finished" : "playing",
                                   turnSeat: payload.turnSeat, winnerSeat: payload.winnerSeat))
     }
 
+    func sendLive(_ frame: LiveFrame) async {
+        guard let channel = subscribedChannel() else { return }
+        do {
+            try await channel.broadcast(event: "live", message: LiveMessage(frame))
+        } catch {
+            lock.withLock { lastBroadcastError = "\(error)" }
+        }
+    }
+
     /// 세 번까지 바로 다시 보내고, 그래도 안 되면 보류해 두고 던진다. 보류분은 폴링이 이어서 보낸다.
+    /// 보류분은 더 큰 `eventCount`로만 바뀌고, 성공한 갱신은 그보다 크지 않은 보류분만 지운다 — 앞서 실패한 옛 갱신이
+    /// 뒤에 성공한 새 갱신의 보류를 지우거나 덮지 않게 하기 위해서다.
     ///
     /// 다만 서버가 판단해 되돌려보낸 거절(`PostgrestError`)은 다시 보내도 결과가 같다 — 끝난 매치를
     /// 고치려 하거나 정책에 막힌 갱신은 트리거·RLS가 언제 보내도 같은 오류를 낸다. 그런 응답은 한 번에
@@ -174,8 +238,8 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
         var lastError: Error?
         for attempt in 0..<3 {
             do {
-                try await client.from("matches").update(update).eq("id", value: matchID.uuidString).execute()
-                lock.withLock { pending = nil; lastSendError = nil }
+                try await conditionalUpdate(update)
+                lock.withLock { clearPending(upTo: update.eventCount); lastSendError = nil }
                 return
             } catch {
                 if error is PostgrestError {
@@ -186,14 +250,28 @@ final class SupabaseTurnTransport: TurnTransport, @unchecked Sendable {
                 try? await Task.sleep(for: .milliseconds(400 * (attempt + 1)))
             }
         }
-        lock.withLock { pending = update; lastSendError = "\(lastError!)" }
+        lock.withLock {
+            if (pending?.eventCount ?? -1) < update.eventCount { pending = update }
+            lastSendError = "\(lastError!)"
+        }
         throw lastError!
+    }
+
+    /// 서버의 `event_count`가 보낼 값보다 작을 때만 고친다. 이미 같거나 더 새 로그면 아무 행도 바뀌지 않고 성공한다.
+    private func conditionalUpdate(_ update: TurnUpdate) async throws {
+        try await client.from("matches").update(update)
+            .eq("id", value: matchID.uuidString).lt("event_count", value: update.eventCount).execute()
+    }
+
+    /// 잠금 안에서 부른다.
+    private func clearPending(upTo eventCount: Int) {
+        if let pending, pending.eventCount <= eventCount { self.pending = nil }
     }
 
     private func retryPendingIfAny() async {
         guard let update = lock.withLock({ pending }) else { return }
-        if (try? await client.from("matches").update(update).eq("id", value: matchID.uuidString).execute()) != nil {
-            lock.withLock { pending = nil; lastSendError = nil }
+        if (try? await conditionalUpdate(update)) != nil {
+            lock.withLock { clearPending(upTo: update.eventCount); lastSendError = nil }
         }
     }
 
