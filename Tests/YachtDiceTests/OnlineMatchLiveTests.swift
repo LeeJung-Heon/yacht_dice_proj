@@ -119,6 +119,74 @@ struct OnlineMatchLiveTests {
         #expect(sentMoves(ta) == [Omok.Move(x: 1, y: 1), nil])
     }
 
+    @Test("수를 두면 들고 있던 순간 상태를 버리고 nil로 거둔다")
+    func 두면_거두기() async throws {
+        let (a, _, ta, _) = makePair()
+        a.publishLive(Omok.Move(x: 1, y: 1))
+        a.publishLive(Omok.Move(x: 2, y: 2))
+        await a.play(Omok.Move(x: 7, y: 7))
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(sentMoves(ta) == [Omok.Move(x: 1, y: 1), nil], "수를 둔 뒤에 지난 차례의 손놀림이 나갔다")
+        #expect(ta.sentLive.last?.eventCount == 0)
+    }
+
+    @Test("재생 중에 도착한 지난 차례의 순간 상태는 다음 차례에 되살아나지 않는다")
+    func 되살아나지_않음() async throws {
+        let (a, b, ta, _) = makePair()
+        var replaying = false
+        var release: CheckedContinuation<Void, Never>?
+        b.onRemoteMove = { _, _ in
+            replaying = true
+            await withCheckedContinuation { release = $0 }
+        }
+        await a.play(Omok.Move(x: 5, y: 5))
+        await waitUntil { replaying }
+        // 상대 수를 재생하는 동안 그 수 전의 손놀림이 늦게 닿는다
+        await ta.sendLive(LiveFrame(eventCount: 0, state: encoded(Omok.Move(x: 9, y: 9))))
+        try await Task.sleep(for: .milliseconds(50))
+        release?.resume()
+        await b.waitForIncoming()
+        b.onRemoteMove = nil
+        await b.play(Omok.Move(x: 6, y: 6))
+        await a.waitForIncoming()
+        // 다시 상대 차례다. 그 사이 상대가 아무것도 보내지 않았으니 보일 것이 없다.
+        #expect(!b.isLocalTurn)
+        #expect(b.remoteLive == nil, "지난 차례의 손놀림이 되살아났다")
+    }
+}
+
+@Suite("OnlineMatch - 순간 상태 (연속 수)")
+@MainActor
+struct OnlineMatchConsecutiveLiveTests {
+    @Test("같은 좌석이 이어 두면 재생 중에 온 다음 수의 순간 상태가 재생 뒤에 보인다")
+    func 연속_수() async throws {
+        let (ta, tb) = InMemoryTurnTransport.pair()
+        let a = OnlineMatch(game: CupPong.self, mode: .online(matchID: "c"),
+                            participants: [.human(name: "A"), .remote(playerID: "b", name: "B")], log: MoveLog<CupPong>(), transport: ta)
+        let b = OnlineMatch(game: CupPong.self, mode: .online(matchID: "c"),
+                            participants: [.remote(playerID: "a", name: "A"), .human(name: "B")], log: MoveLog<CupPong>(), transport: tb)
+        a.startListening(); b.startListening()
+        var replaying = false
+        var release: CheckedContinuation<Void, Never>?
+        b.onRemoteMove = { _, _ in
+            replaying = true
+            await withCheckedContinuation { release = $0 }
+        }
+        // 맞히는 던지기라 A가 한 번 더 던진다
+        #expect(await a.play(CupPongMatchTests.winningShots[0]))
+        #expect(a.isLocalTurn)
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !replaying, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        a.publishLive(CupPongScreen.Live(aiming: true))
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(b.remoteLive == nil, "재생 중에는 다음 수의 손놀림을 그리지 않는다")
+        release?.resume()
+        await b.waitForIncoming()
+        #expect(b.remoteLive(as: CupPongScreen.Live.self) == CupPongScreen.Live(aiming: true), "재생 뒤에도 조준 중이 보이지 않는다")
+    }
+}
+
+extension OnlineMatchLiveTests {
     @Test("로컬 2인은 아무것도 보내지 않고 remoteLive가 없다")
     func 로컬() async throws {
         let local = OnlineMatch(game: Omok.self, mode: .passAndPlay(names: ["A", "B"]), participants: [.human(name: "A"), .human(name: "B")],

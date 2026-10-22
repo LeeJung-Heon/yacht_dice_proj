@@ -26,8 +26,15 @@ final class OnlineMatch<G: Game> {
     }
     /// 상대가 방금 둔 수. 화면이 팝업으로 알린다.
     private(set) var lastRemoteMove: RemoteMove?
-    /// 상대가 지금 하고 있는 것(확정 전의 손놀림). 게임별 JSON이며, 내 로그와 수가 다르거나 상대 수가 오면 nil이다.
-    private(set) var remoteLive: Data?
+    /// 상대가 지금 하고 있는 것(확정 전의 손놀림). 게임별 JSON이며, 내 로그와 같은 수 위의 것이고 재생 중이 아닐 때만 있다.
+    /// 상대 수가 오면 그 전의 손놀림은 수가 맞지 않아 저절로 사라지고, 같은 좌석이 이어 두며 먼저 보낸 다음 수의 손놀림은
+    /// 재생이 끝나 로그가 따라잡으면 그때 보인다.
+    var remoteLive: Data? {
+        guard let remoteFrame, remoteFrame.eventCount == log.moves.count, !isReplaying else { return nil }
+        return remoteFrame.state
+    }
+    /// 받은 마지막 프레임. 내 로그보다 앞선 수의 것도 들고 있는다.
+    private var remoteFrame: LiveFrame?
 
     /// 상대 수를 화면에서 재생한다. 끝날 때까지 다음 수를 넘기지 않는다.
     var onRemoteMove: (@MainActor (G.Move, ThrowHint?) async -> Void)?
@@ -85,6 +92,8 @@ final class OnlineMatch<G: Game> {
     @discardableResult
     func play(_ move: G.Move, hint: ThrowHint? = nil) async -> Bool {
         guard isLocalTurn, G.canApply(move, to: state) else { return false }
+        // 둔 수 전의 손놀림은 끝났다. 들고 있던 값이 수 뒤에 나가지 않게 먼저 거둔다.
+        withdrawLive()
         if let hint { hints.append(ThrowHint(event: log.moves.count, trajectory: hint.trajectory, direction: hint.direction, yaws: hint.yaws)) }
         log.append(move)
         notifyLogChanged()
@@ -126,6 +135,8 @@ final class OnlineMatch<G: Game> {
                 self.liveFlushTask = nil
                 guard let pending = self.livePending else { return }
                 self.livePending = nil
+                // 기다리는 사이 수가 바뀌었거나 차례가 넘어갔으면 지난 손놀림이다.
+                guard pending.eventCount == self.log.moves.count, self.isLocalTurn else { return }
                 self.sendLiveNow(pending)
             }
             return
@@ -208,7 +219,7 @@ final class OnlineMatch<G: Game> {
                 guard let self else { return }
                 self.opponentPresent = remoteID.map { present.contains($0) } ?? !present.isEmpty
                 // 떠난 상대의 손놀림은 그대로 멈춰 남지 않게 거둔다.
-                if !self.opponentPresent { self.remoteLive = nil }
+                if !self.opponentPresent { self.remoteFrame = nil }
             }
         }
         connectionTask = Task { [weak self] in
@@ -216,16 +227,16 @@ final class OnlineMatch<G: Game> {
                 if Task.isCancelled { return }
                 guard let self else { return }
                 self.isConnected = connected
-                if !connected { self.remoteLive = nil }
+                if !connected { self.remoteFrame = nil }
             }
         }
         liveTask = Task { [weak self] in
             for await frame in transport.live {
                 if Task.isCancelled { return }
                 guard let self else { return }
-                // 다른 수 위에서 한 손놀림이다 — 늦게 온 지난 차례의 것이거나 아직 재생하지 못한 수 뒤의 것이다.
-                guard frame.eventCount == self.log.moves.count else { continue }
-                self.remoteLive = frame.state
+                // 내 로그보다 뒤처진 수 위의 것은 늦게 온 지난 차례의 손놀림이다. 앞선 것은 재생이 따라잡을 때까지 들고 있는다.
+                guard frame.eventCount >= self.log.moves.count else { continue }
+                self.remoteFrame = frame
             }
         }
     }
@@ -240,7 +251,7 @@ final class OnlineMatch<G: Game> {
         connectionTask?.cancel(); connectionTask = nil
         replayTask?.cancel(); replayTask = nil
         liveTask?.cancel(); liveTask = nil
-        remoteLive = nil
+        remoteFrame = nil
     }
 
     func resync() async { await transport?.refresh() }
@@ -257,8 +268,6 @@ final class OnlineMatch<G: Game> {
             if theirs.moves.count > mine.count { lastTransportError = "상대의 기록이 내 기록과 어긋난다" }
             return
         }
-        // 상대가 수를 두었으니 그 전의 손놀림은 끝났다.
-        remoteLive = nil
         isReplaying = true
         defer { isReplaying = false }
         // 상대의 마지막 수로 판이 끝났을 수 있다. 로그를 알린 뒤에 부르려고 먼저 선언한다.
