@@ -275,15 +275,16 @@ struct CupPongScreen: View {
                 frozen = ThrowFreeze(shooter: shooter, cups: cups, remaining: [remaining(0), remaining(1)])
                 throwTask = Task {
                     defer { isThrowing = false; throwTask = nil }
-                    async let landing = Self.animate(shot: shot, against: cups, ball: $ball, vanishing: $vanishing)
-                    let played = await match.play(shot)
-                    _ = await landing
-                    guard !Task.isCancelled else { return }
-                    // 옅어진 컵과 묶음을 함께 거둔다. 따로 거두면 한 프레임 동안 컵이 되살아난다.
-                    vanishing = nil
-                    frozen = nil
-                    if !played { showToast("지금은 던질 수 없다") }
-                    announceTurn()
+                    await CupPongThrow.run(
+                        play: { await match.play(shot) },
+                        animate: { _ = await Self.animate(shot: shot, against: cups, ball: $ball, vanishing: $vanishing) },
+                        landed: {
+                            // 옅어진 컵과 묶음을 함께 거둔다. 따로 거두면 한 프레임 동안 컵이 되살아난다.
+                            vanishing = nil
+                            frozen = nil
+                            announceTurn()
+                        },
+                        rejected: { showToast("지금은 던질 수 없다") })
                 }
             }
     }
